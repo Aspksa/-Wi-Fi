@@ -524,20 +524,26 @@ function Show-Diagnostics($Snapshot, [string] $State) {
 
 function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] $State, $Native) {
     foreach ($band in @('2.4', '5')) {
-        $past = Get-PastScores $script:history $At $band
-        $plan = Get-ChannelPlan $script:points $band $Connected $past
-        if ($script:database -and $plan.Home) {
-            try {
-                $memory = Get-TrialMemory $script:database (Get-WifiNetworkKey $plan.Home) $plan.Home.Channel
-                if ($memory.Count) { $plan = Get-ChannelPlan $script:points $band $Connected $past $memory }
-            } catch { $script:storageNote = 'Не удалось прочитать результаты прошлых смен канала.' }
+        $plan = Get-ChannelPlan $script:points $band $Connected
+        if ($plan.Home) {
+            $past = Get-PastScores $script:history $At $band $plan.Current.Width
+            $memory = @{}
+            if ($script:database) {
+                try {
+                    $memory = Get-TrialMemory $script:database (Get-WifiNetworkKey $plan.Home) $plan.Home.Channel $plan.Current.Width
+                } catch { $script:storageNote = 'Не удалось прочитать результаты прошлых смен канала.' }
+            }
+            if ($past.Count -or $memory.Count) { $plan = Get-ChannelPlan $script:points $band $Connected $past $memory }
         }
         $script:plans[$band] = $plan
         $bandText = $band.Replace('.', ',') + ' ГГц'
         $previous = $script:streak[$band]
         $observation = Get-ScanObservationKey $Native $script:points $band $At
         $count = 0
-        $key = "$($plan.Home.BSSID)|$($plan.Home.Channel)|$($plan.Best.Channel)"
+        $key = "$($plan.Home.BSSID)|$($plan.Home.Channel)/$($plan.Current.Width)|$($plan.Best.Channel)/$($plan.Best.Width)"
+        $choice = if ($plan.Best.Width) {
+            "$($plan.Best.Channel) / $($plan.Best.Width) МГц"
+        } else { "$($plan.Best.Channel)" }
         if ($Native -and -not $observation) {
             $message = 'Ожидание свежего снимка эфира.'
         } elseif (-not $plan.Home) {
@@ -551,15 +557,15 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
                 if ($previous.Observation -ne $observation) { $count++ }
             }
             if ($count -ge 3) {
-                $current = $plan.Rows | Where-Object Current | Select-Object -First 1
+                $current = $plan.Current
                 $message = if ($plan.TrialSupport) {
-                    "Канал $($plan.Best.Channel) уменьшал скачки в $($plan.TrialSupport.Wins) прошлых сравнениях."
+                    "Канал $choice · помогло в $($plan.TrialSupport.Wins) прошлых сравнениях."
                 } else {
-                    "Канал $($plan.Home.Channel) → $($plan.Best.Channel): $($current.Score) → $($plan.Best.Score) баллов."
+                    "Канал $choice · оценка помех $($current.Score) → $($plan.Best.Score)."
                 }
                 if ($count -eq 3 -and $previous.Samples -lt 3) { Add-MonitorEvent $script:history $At "$bandText · совет: $message" }
             } else {
-                $message = "Кандидат $($plan.Best.Channel) · подтверждение $count из 3."
+                $message = "Кандидат $choice · подтверждение $count из 3."
             }
         } elseif ($script:forecast -and $script:forecast.Band -eq $band -and
                 $script:forecast.Network -eq (Get-WifiNetworkKey $plan.Home) -and
@@ -636,7 +642,7 @@ function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost) {
         else { 'clear' }
     }
     $measurement = [pscustomobject] @{
-        At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Signal = $radio.Signal
+        At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Width = $radio.Width; Signal = $radio.Signal
         Upload = $upload; Overlap = $overlap; Lan = $Milliseconds; LanLoss = $Lost
         Wan = $external.Milliseconds; WanLoss = $external.Lost
     }

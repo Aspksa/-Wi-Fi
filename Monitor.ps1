@@ -56,7 +56,7 @@ function Update-TrackedPoint($History, [object[]] $Points, $Plans, [datetime] $A
     $tracked.Overlap = $overlap
 }
 
-function Get-PastScores($History, [datetime] $At, [string] $Band) {
+function Get-PastScores($History, [datetime] $At, [string] $Band, [Nullable[int]] $Width) {
     $hour = $At.ToString('HH')
     $currentKey = $At.ToString('yyyy-MM-dd HH')
     $cutoff = $At.AddDays(-7).ToString('yyyy-MM-dd HH')
@@ -66,6 +66,7 @@ function Get-PastScores($History, [datetime] $At, [string] $Band) {
         if ($entry.Band -ne $Band -or $entry.Key -lt $cutoff -or $entry.Key -ge $currentKey -or
                 -not $entry.Key.EndsWith(" $hour")) { continue }
         foreach ($value in $entry.Channels) {
+            if ($value.Width -ne $Width) { continue }
             $channel = [int] $value.Channel
             if (-not $sums.ContainsKey($channel)) { $sums[$channel] = 0.0; $counts[$channel] = 0 }
             $sums[$channel] += $value.Sum / $value.Count
@@ -90,9 +91,9 @@ function Update-HeatHistory($History, $Plans, [datetime] $At) {
             $History.Hours += $entry
         }
         foreach ($row in ($plan.Rows | Where-Object { $_.Candidate -or $_.Current })) {
-            $value = $entry.Channels | Where-Object { $_.Channel -eq $row.Channel } | Select-Object -First 1
+            $value = $entry.Channels | Where-Object { $_.Channel -eq $row.Channel -and $_.Width -eq $row.Width } | Select-Object -First 1
             if (-not $value) {
-                $value = [pscustomobject] @{ Channel = $row.Channel; Sum = 0.0; Count = 0 }
+                $value = [pscustomobject] @{ Channel = $row.Channel; Width = $row.Width; Sum = 0.0; Count = 0 }
                 $entry.Channels += $value
             }
             $value.Sum += $row.Score

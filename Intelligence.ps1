@@ -111,17 +111,21 @@ function Get-ChannelTrialResult($Trial, [object[]] $After, [long] $Now) {
     $beforeP90 = Get-LatencyPercentile $beforeTimes
     $afterP90 = Get-LatencyPercentile $afterTimes
     $improved = $null
-    $message = "Каналы $($Trial.Old) → $($Trial.New): мало сопоставимых замеров."
+    $change = if ($Trial.OldWidth -and $Trial.NewWidth) {
+        "$($Trial.Old)/$($Trial.OldWidth) → $($Trial.New)/$($Trial.NewWidth) МГц"
+    } else { "Каналы $($Trial.Old) → $($Trial.New)" }
+    $message = "$change · мало сопоставимых замеров."
     if ($pairs -ge 25) {
         $improved = 0
         $delta = $beforeLag - $afterLag
         if ([Math]::Abs($delta) -ge 3 -and [Math]::Abs($delta) / $pairs -ge 0.10) {
             $improved = [Math]::Sign($delta)
         }
-        $message = "Каналы $($Trial.Old) → $($Trial.New): скачки или потери $beforeLag → $afterLag из $pairs пар."
+        $message = "$change · скачки или потери $beforeLag → $afterLag из $pairs пар."
     }
     [pscustomobject] @{
         Id = [Guid]::NewGuid().ToString('N'); At = $Now; Network = $Trial.Network; Old = $Trial.Old; New = $Trial.New
+        OldWidth = $Trial.OldWidth; NewWidth = $Trial.NewWidth
         Improved = $improved; BeforeBad = $beforeLag; AfterBad = $afterLag; Pairs = $pairs
         BeforeP90 = $beforeP90; AfterP90 = $afterP90; Message = $message
     }
@@ -139,10 +143,11 @@ function Update-WifiRadio($Engine, $Radio, [long] $Now) {
     if ($old -and $Radio) {
         if ($old.Network -ne $Radio.Network) {
             $Engine.Trial = $null
-        } elseif ($old.Channel -ne $Radio.Channel -and $old.At -ge $Now - 120000) {
+        } elseif ($old.At -ge $Now - 120000 -and ($old.Channel -ne $Radio.Channel -or
+                ($old.Width -and $Radio.Width -and $old.Width -ne $Radio.Width))) {
             $last = 0L
             $before = @(foreach ($entry in $Engine.Samples) {
-                if ($entry.Network -eq $Radio.Network -and $entry.Channel -eq $old.Channel -and
+                if ($entry.Network -eq $Radio.Network -and $entry.Channel -eq $old.Channel -and $entry.Width -eq $old.Width -and
                         $entry.At -le $old.At -and $entry.At -ge $old.At - 90000 -and $entry.At - $last -ge 950) {
                     $last = $entry.At
                     $entry
@@ -150,6 +155,7 @@ function Update-WifiRadio($Engine, $Radio, [long] $Now) {
             })
             $Engine.Trial = @{
                 Network = $Radio.Network; Old = $old.Channel; New = $Radio.Channel; At = $Now; Before = $before
+                OldWidth = $old.Width; NewWidth = $Radio.Width
             }
         }
     }
@@ -160,7 +166,8 @@ function Get-SampleContext($Sample) {
     if (-not $Sample.Network -or $null -eq $Sample.Upload -or -not $Sample.Channel -or -not $Sample.Overlap) { return }
     $traffic = if ($Sample.Upload -ge 1000) { 'upload' } else { 'quiet' }
     $radio = if ($Sample.Overlap -in @('strong', 'changed')) { 'strong' } else { 'clear' }
-    "$($Sample.Channel)|$traffic|$radio"
+    $geometry = Get-WidthTrialKey $Sample.Channel $Sample.Width
+    "$geometry|$traffic|$radio"
 }
 
 function Test-ForecastConfidence($Evidence) {
@@ -193,7 +200,7 @@ function Add-WifiSample($Engine, $Sample, [scriptblock] $ReadEvidence) {
     $trial = $Engine.Trial
     if ($trial -and $now -ge $trial.At + 105000) {
         $after = @($Engine.Samples | Where-Object {
-            $_.Network -eq $trial.Network -and $_.Channel -eq $trial.New -and
+            $_.Network -eq $trial.Network -and $_.Channel -eq $trial.New -and $_.Width -eq $trial.NewWidth -and
                 $_.At -ge $trial.At + 15000 -and $_.At -le $trial.At + 105000
         })
         $result = Get-ChannelTrialResult $trial $after $now
@@ -253,14 +260,16 @@ function Get-WifiRadioContext([object[]] $Points, [string[]] $Connected, $Previo
         }
     }
     $signature = @($neighbors | Sort-Object -Unique) -join ','
+    $width = Get-ReportedWidth $ownPoint
     $changedAt = 0L
     if ($signature -and $Previous -and $Previous.Network -eq $network -and
-            $Previous.Channel -eq $ownPoint.Channel -and $Now - $Previous.At -le 50000) {
+            $Previous.Channel -eq $ownPoint.Channel -and $Previous.Width -eq $width -and $Now - $Previous.At -le 50000) {
         if ($Previous.Signature -ne $signature) { $changedAt = $Now }
         else { $changedAt = $Previous.ChangedAt }
     }
     [pscustomobject] @{
         At = $Now; Network = $network; Band = $ownPoint.Band; Signal = $ownPoint.Signal; Channel = $ownPoint.Channel
+        Width = $width
         Signature = $signature; ChangedAt = $changedAt; ObservedAt = $ownPoint.ObservedAt
     }
 }

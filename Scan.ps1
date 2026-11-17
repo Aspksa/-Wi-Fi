@@ -103,14 +103,19 @@ function Get-SignalFootprint([string] $Band, [int] $Channel, $Point) {
     [pscustomobject] @{ Primary = $primary; Left = $primary - 10; Right = $primary + 10; Width = 20 }
 }
 
-function Get-CandidateFootprint([string] $Band, [int] $Channel, $HomePoint) {
+function Get-ReportedWidth($Point) {
+    if ($Point.RadioWidth -and -not $Point.RadioWidth.SecondaryCenter) { [int] $Point.RadioWidth.Width }
+}
+
+function Get-CandidateFootprint([string] $Band, [int] $Channel, $HomePoint, [int] $Width = 0) {
     $footprint = Get-SignalFootprint $Band $Channel $HomePoint
-    if ($footprint.Measured -or -not $HomePoint.RadioWidth) { return $footprint }
-    $width = $HomePoint.RadioWidth.Width
+    if (-not $Width -and ($footprint.Measured -or -not $HomePoint.RadioWidth)) { return $footprint }
+    if ($Width -eq $HomePoint.RadioWidth.Width -and $footprint.Measured) { return $footprint }
+    if (-not $Width) { $Width = $HomePoint.RadioWidth.Width }
     $center = $footprint.Primary
-    $secondary = $HomePoint.RadioWidth.SecondaryCenter
+    $secondary = if ($Width -eq $HomePoint.RadioWidth.Width) { $HomePoint.RadioWidth.SecondaryCenter }
     if ($Band -eq '2.4') {
-        $center += $HomePoint.RadioWidth.Center - $HomePoint.Frequency
+        if ($Width -eq 40) { $center += $HomePoint.RadioWidth.Center - $HomePoint.Frequency }
         $secondaryFrequency = 2 * $center - $footprint.Primary
         if ($width -eq 40 -and ($secondaryFrequency -lt 2412 -or $secondaryFrequency -gt 2472)) { return }
     } elseif ($width -gt 20) {
@@ -119,7 +124,9 @@ function Get-CandidateFootprint([string] $Band, [int] $Channel, $HomePoint) {
         if ($width -eq 40) { $center = 5000 + 5 * ($start + 2 + 8 * [Math]::Floor(($Channel - $start) / 8)) }
         if ($width -eq 80) { $center = 5000 + 5 * ($start + 6) }
         if ($width -eq 160) {
-            foreach ($wideStart in @(36, 100, 149)) {
+            # The RE3L menu shows only channels 149–161 in the upper group.
+            # Do not propose a 160 MHz move that would also need channels 165–177.
+            foreach ($wideStart in @(36, 100)) {
                 if ($Channel -ge $wideStart -and $Channel -le $wideStart + 28) {
                     $center = 5000 + 5 * ($wideStart + 14)
                     break
@@ -182,6 +189,46 @@ function Get-ChannelScore {
     [Math]::Round($score)
 }
 
+function Get-WidthTrialKey([int] $Channel, $Width) {
+    if ($Width) { return "$Channel/$Width" }
+    $Channel
+}
+
+function Test-TrialBenefit($Trial) {
+    $Trial -and $Trial.Wins -ge 2 -and $Trial.Wins -ge $Trial.Losses + 2
+}
+
+function Find-NarrowerChannel([string] $Band, $HomePoint, $Current, [int[]] $Channels,
+        [object[]] $Neighbors, [hashtable] $TrialMemory) {
+    $width = Get-ReportedWidth $HomePoint
+    foreach ($candidateWidth in @(80, 40, 20)) {
+        if ($candidateWidth -ge $width -or ($Band -eq '2.4' -and $candidateWidth -ne 20)) { continue }
+        $candidates = foreach ($channel in $Channels) {
+            $shape = Get-CandidateFootprint $Band $channel $HomePoint $candidateWidth
+            if (-not $shape) { continue }
+            $score = Get-ChannelScore $channel $Band $Neighbors $shape
+            $trial = $TrialMemory[(Get-WidthTrialKey $channel $candidateWidth)]
+            $proven = Test-TrialBenefit $trial
+            $cleaner = $Current.Score -gt 0 -and $score -le $Current.Score * 0.7 -and $Current.Score - $score -ge 5
+            if ($score -le $Current.Score -and ($cleaner -or $proven)) {
+                [pscustomobject] @{
+                    Channel = $channel
+                    Width = $candidateWidth
+                    Score = $score
+                    Rank = $score + $(if ($trial -and $trial.Count -ge 2) {
+                        [Math]::Max(-15, [Math]::Min(15, 5 * ($trial.Losses - $trial.Wins)))
+                    } else { 0 })
+                    TrialSupport = if ($proven) { $trial }
+                    KeepChannel = $channel -eq $HomePoint.Channel
+                }
+            }
+        }
+        $best = $candidates | Sort-Object -Property Rank, Score,
+            @{ Expression = 'KeepChannel'; Descending = $true }, Channel | Select-Object -First 1
+        if ($best) { return $best }
+    }
+}
+
 function Get-ChannelPlan {
     param([object[]] $Points, [string] $Band, [string[]] $Connected, [hashtable] $PastScores = @{}, [hashtable] $TrialMemory = @{})
 
@@ -193,19 +240,21 @@ function Get-ChannelPlan {
     ) | Select-Object -First 1
 
     $candidates = if ($Band -eq '2.4') { @(1, 6, 11) } else { @(36, 40, 44, 48, 149, 153, 157, 161) }
+    $knownWidth = Get-ReportedWidth $homePoint
     $observed = @($visible | ForEach-Object { $_.Channel })
     $channels = @($candidates) + $observed | Sort-Object -Unique
     $rows = foreach ($channel in $channels) {
         $footprint = Get-CandidateFootprint $Band $channel $homePoint
         $score = Get-ChannelScore $channel $Band $neighbors $footprint
         $past = $PastScores[[int] $channel]
-        $result = $TrialMemory[[int] $channel]
+        $result = $TrialMemory[(Get-WidthTrialKey $channel $knownWidth)]
         $trialAdjustment = 0
         if ($result -and $result.Count -ge 2) {
             $trialAdjustment = [Math]::Max(-15, [Math]::Min(15, 5 * ($result.Losses - $result.Wins)))
         }
         [pscustomobject] @{
             Channel = $channel
+            Width = $knownWidth
             Count = @($neighbors | Where-Object Channel -eq $channel).Count
             Score = $score
             Rank = $score + [Math]::Min(15.0, [double] $past * 0.15) + $trialAdjustment
@@ -214,16 +263,33 @@ function Get-ChannelPlan {
         }
     }
 
-    $best = $rows | Where-Object Candidate | Sort-Object -Property Rank, Score, Channel | Select-Object -First 1
+    $available = @($rows | Where-Object Candidate | Sort-Object -Property Rank, Score, Channel)
     $current = $rows | Where-Object Current | Select-Object -First 1
-    $trialSupport = $TrialMemory[[int] $best.Channel]
-    $proven = $trialSupport -and $trialSupport.Wins -ge 2 -and $trialSupport.Wins -ge $trialSupport.Losses + 2
-    $improves = $null -ne $best -and $null -ne $current -and $best.Channel -ne $current.Channel -and (
-        ($current.Score -gt 0 -and $best.Score -le $current.Score * 0.7) -or
-        ($proven -and $best.Score -le $current.Score)
-    )
+    $best = $available | Select-Object -First 1
+    $preferred = if ($current) {
+        $available | Where-Object {
+            $_.Channel -ne $current.Channel -and $_.Score -le $current.Score -and (
+                ($current.Score -gt 0 -and $_.Score -le $current.Score * 0.7) -or
+                (Test-TrialBenefit $TrialMemory[(Get-WidthTrialKey $_.Channel $knownWidth)])
+            )
+        } | Select-Object -First 1
+    }
+    $improves = $null -ne $preferred
+    if ($preferred) { $best = $preferred }
+    $trialSupport = if ($best) { $TrialMemory[(Get-WidthTrialKey $best.Channel $knownWidth)] }
+    $proven = Test-TrialBenefit $trialSupport
+    if (-not $improves -and $current -and $knownWidth -gt 20) {
+        $narrower = Find-NarrowerChannel $Band $homePoint $current $candidates $neighbors $TrialMemory
+        if ($narrower) {
+            $best = $narrower
+            $improves = $true
+            $trialSupport = $narrower.TrialSupport
+            $proven = [bool] $trialSupport
+        }
+    }
     [pscustomobject] @{
         Home = $homePoint
+        Current = $current
         Rows = $rows
         Best = $best
         Improves = $improves

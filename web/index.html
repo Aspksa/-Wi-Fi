@@ -35,22 +35,44 @@
 
     <div class="main-grid">
       <section class="panel spectrum" aria-labelledby="spectrum-title">
-        <div class="panel-heading">
-          <h2 id="spectrum-title">Карта каналов</h2>
+        <div class="panel-heading spectrum-heading">
+          <h2 id="spectrum-title">Карта эфира</h2>
           <div class="legend"><span><i class="own"></i>Своя сеть</span><span><i class="neighbor"></i>Соседи</span><span><i class="overlap"></i>Пересечение</span></div>
         </div>
-        <div class="spectrum-band">
-          <div class="band-heading"><h3>2,4 <small>ГГц</small></h3><p id="band-24">Ожидание</p></div>
-          <div class="plot-wrap">
-            <canvas id="spectrum-24" role="img" aria-label="Уровни сигнала соседних сетей на каналах 2,4 ГГц"></canvas>
-            <p class="tooltip" id="tip-24" hidden></p>
+        <div class="spectrum-bands">
+          <div class="spectrum-band">
+            <div class="band-heading"><h3>2,4 <small>ГГц</small></h3><p id="band-24">Ожидание</p></div>
+            <div class="plot-wrap">
+              <canvas id="spectrum-24" class="spectrum-plot" tabindex="0" aria-label="Каналы 2,4 ГГц. Стрелки выбирают точку, Escape снимает выбор."></canvas>
+              <p class="tooltip" id="tip-24" hidden></p>
+            </div>
+            <div class="waterfall">
+              <span>История сигналов</span>
+              <canvas id="waterfall-24" role="img" aria-label="Интенсивность сигналов по каналам 2,4 ГГц в последних сканированиях"></canvas>
+            </div>
+          </div>
+          <div class="spectrum-band">
+            <div class="band-heading"><h3>5 <small>ГГц</small></h3><p id="band-5">Ожидание</p></div>
+            <div class="plot-wrap">
+              <canvas id="spectrum-5" class="spectrum-plot" tabindex="0" aria-label="Каналы 5 ГГц. Стрелки выбирают точку, Escape снимает выбор."></canvas>
+              <p class="tooltip" id="tip-5" hidden></p>
+            </div>
+            <div class="waterfall">
+              <span>История сигналов</span>
+              <canvas id="waterfall-5" role="img" aria-label="Интенсивность сигналов по каналам 5 ГГц в последних сканированиях"></canvas>
+            </div>
           </div>
         </div>
-        <div class="spectrum-band">
-          <div class="band-heading"><h3>5 <small>ГГц</small></h3><p id="band-5">Ожидание</p></div>
-          <div class="plot-wrap">
-            <canvas id="spectrum-5" role="img" aria-label="Уровни сигнала соседних сетей на каналах 5 ГГц"></canvas>
-            <p class="tooltip" id="tip-5" hidden></p>
+        <div class="spectrum-toolbar">
+          <div class="point-focus">
+            <p id="point-focus">Выбери точку на карте</p>
+            <button id="clear-point" class="quiet" type="button" hidden>Снять выбор</button>
+          </div>
+          <div class="playback">
+            <label for="history-position">Снимок эфира</label>
+            <input id="history-position" type="range" min="0" max="0" value="0" disabled>
+            <output id="history-time" for="history-position">Сейчас</output>
+            <button id="go-live" class="quiet" type="button" hidden>К текущему</button>
           </div>
         </div>
       </section>

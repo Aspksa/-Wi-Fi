@@ -80,6 +80,11 @@ function Receive-WebScan($Run) {
             $Run.Source = 'netsh'
             $Run.ScanAt = Get-UnixMilliseconds
         }
+        $frames = @(Update-SpectrumFrames $Run.Spectrum (Get-SpectrumFrame $Run.ScanAt $Run.Points))
+        if ($frames.Count -and (-not $Run.Spectrum.Count -or $frames[-1].key -ne $Run.Spectrum[-1].key)) {
+            $Run.Spectrum = $frames
+            $Run.Server.SetSpectrum((ConvertTo-Json -InputObject $frames -Depth 8 -Compress))
+        }
         $Run.Issue = ''
         $Run.Diagnostics = $result.Diagnostics
         $Run.Link = Get-LinkState $result.Diagnostics
@@ -211,7 +216,7 @@ if (-not $ownsMutex) {
 }
 $run = @{
     Engine = New-WifiIntelligence; History = New-MonitorHistory; Database = $null
-    HomeName = ''; Points = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @()
+    HomeName = ''; Points = @(); Spectrum = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @()
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L
@@ -233,6 +238,12 @@ try {
     $run.WanPing = [Net.NetworkInformation.Ping]::new()
     $run.WanTarget = [Net.IPAddress]::Parse('1.1.1.1')
     $server = [WiFi.WebServer]::new((Join-Path $PSScriptRoot 'web'))
+    $run.Server = $server
+    if ($run.Database) {
+        try { $run.Spectrum = @(Read-WebSpectrum $run.Database (Get-UnixMilliseconds)) }
+        catch { $run.Storage = 'Не удалось прочитать предыдущие снимки эфира.' }
+    }
+    $server.SetSpectrum((ConvertTo-Json -InputObject $run.Spectrum -Depth 8 -Compress))
     Start-WebScan $run (Get-UnixMilliseconds) $true
     $server.SetState((Get-WebState $run (Get-UnixMilliseconds) (Get-Date) | ConvertTo-Json -Depth 8 -Compress))
     Write-Host "Wi Fi открыт по адресу $($server.Address). Для остановки нажми Ctrl+C."

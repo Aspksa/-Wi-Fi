@@ -21,6 +21,14 @@ let renderedEvents = "";
 let renderedHeat = "";
 let lastStateTime = 0;
 let receivedAt = 0;
+let spectrumFrames = [];
+let frameKey = null;
+let pinnedPoint = null;
+let latestSpectrumScan = null;
+let loadingSpectrum = false;
+let revealAt = -Infinity;
+const frameBins = new Map();
+const historyPosition = byId("history-position");
 
 function child(tag, text, className) {
   const element = document.createElement(tag);
@@ -122,6 +130,78 @@ function renderLists() {
   }
 }
 
+function selectedFrame() {
+  return spectrumFrames.find((candidate) => candidate.key === frameKey);
+}
+
+function mapPoints() {
+  return selectedFrame()?.points || state?.points || [];
+}
+
+function pointCaption(point) {
+  return point.name + " · канал " + point.channel + " · " + point.frequency + " МГц · " + point.signalText +
+    " · " + (point.measured ? "" : "≈") + point.width + " МГц" + (point.stale ? " · старый замер" : "");
+}
+
+function renderMapControls() {
+  const archive = selectedFrame();
+  const selectedPoint = mapPoints().find((point) => point.id === pinnedPoint);
+  byId("point-focus").textContent = selectedPoint ? pointCaption(selectedPoint) :
+    pinnedPoint ? "Выбранной точки нет в этом снимке" : "Выбери точку на карте";
+  byId("clear-point").hidden = !pinnedPoint;
+  historyPosition.disabled = spectrumFrames.length === 0;
+  historyPosition.max = String(spectrumFrames.length);
+  historyPosition.value = String(archive ? spectrumFrames.indexOf(archive) : spectrumFrames.length);
+  byId("history-time").textContent = archive ? new Date(archive.at).toLocaleTimeString("ru-RU") : "Сейчас";
+  historyPosition.setAttribute("aria-valuetext", byId("history-time").textContent);
+  byId("go-live").hidden = !archive;
+  for (const band of sources) {
+    const ownPoint = archive ? archive.points.filter((point) => point.own && point.band === band.key)
+      .sort((a, b) => b.signal - a.signal)[0] : null;
+    const current = state?.bands.find((item) => item.key === band.key);
+    const channel = archive ? ownPoint?.channel : current?.channel;
+    const width = archive ? ownPoint?.width : current?.width;
+    byId("band-" + band.suffix).textContent = channel ?
+      "Канал " + channel + (width ? " / " + width + " МГц" : "") : "Своя сеть не видна";
+  }
+}
+
+async function refreshSpectrum(scanAt) {
+  if (latestSpectrumScan === scanAt || loadingSpectrum) return;
+  loadingSpectrum = true;
+  try {
+    const response = await fetch("/api/spectrum", { cache: "no-store", signal: AbortSignal.timeout(2600) });
+    if (!response.ok) return;
+    const frames = await response.json();
+    if (!Array.isArray(frames)) return;
+    latestSpectrumScan = scanAt;
+    if (frames.at(-1)?.key !== spectrumFrames.at(-1)?.key && !reduceMotion.matches) revealAt = performance.now();
+    spectrumFrames = frames;
+    if (frameKey && !selectedFrame()) frameKey = null;
+    for (const key of frameBins.keys()) {
+      if (!frames.some((candidate) => candidate.key === key)) frameBins.delete(key);
+    }
+    renderMapControls();
+    scheduleDraw();
+  } catch {
+    // The live plot remains available while the archive is unavailable.
+  } finally {
+    loadingSpectrum = false;
+  }
+}
+
+function chooseFrame(key) {
+  frameKey = key;
+  renderMapControls();
+  scheduleDraw();
+}
+
+function choosePoint(id) {
+  pinnedPoint = id;
+  renderMapControls();
+  scheduleDraw();
+}
+
 function renderState(next) {
   const previous = state?.points?.find((point) => point.id === next.tracked && !point.stale);
   const current = next.points.find((point) => point.id === next.tracked && !point.stale);
@@ -141,8 +221,6 @@ function renderState(next) {
   state.bands.forEach((band, index) => {
     const suffix = sources[index].suffix;
     byId("advice-" + suffix).textContent = band.advice;
-    byId("band-" + suffix).textContent = band.channel ?
-      "Канал " + band.channel + (band.width ? " / " + band.width + " МГц" : "") : "Своя сеть не видна";
   });
   formatDestination("router", state.diagnostics?.Router);
   formatDestination("internet", state.diagnostics?.Internet);
@@ -155,6 +233,8 @@ function renderState(next) {
   })[state.link] || "Ожидание диагностики.";
   renderHeat();
   renderLists();
+  renderMapControls();
+  void refreshSpectrum(state.scanAt);
   scheduleDraw();
 }
 
@@ -193,17 +273,25 @@ function drawBand(band, now) {
   const { context, width, height } = viewport(byId("spectrum-" + band.suffix));
   const floor = height - 23;
   const space = floor - 10;
-  const points = (state?.points || []).filter((point) => point.band === band.key);
-  const local = points.find((point) => point.id === state?.bands.find((item) => item.key === band.key)?.ownId && !point.stale);
+  const archive = selectedFrame();
+  const points = mapPoints().filter((point) => point.band === band.key);
+  const currentOwnId = state?.bands.find((item) => item.key === band.key)?.ownId;
+  const local = archive ? points.filter((point) => point.own).sort((a, b) => b.signal - a.signal)[0] :
+    points.find((point) => point.id === currentOwnId && !point.stale);
+  const focused = points.find((point) => point.id === pinnedPoint);
   const geometry = (point, segment, delta = 0) => makeArc(
     position(segment.Left + delta, band, width),
     position(segment.Right + delta, band, width),
     floor, Math.max(5, point.signal / 100 * space)
   );
   const localPaths = local ? local.segments.map((segment) => geometry(local, segment)) : [];
+  const gridTint = context.createLinearGradient(14, 0, width - 14, 0);
+  gridTint.addColorStop(0, "#3c443536");
+  gridTint.addColorStop(.48, "#59644983");
+  gridTint.addColorStop(1, "#3c443536");
   context.font = '10px "Consolas", monospace';
   context.lineWidth = 1;
-  context.strokeStyle = palette.grid;
+  context.strokeStyle = gridTint;
   for (let row = 0; row < 4; row++) {
     const y = floor - row * space / 3;
     context.beginPath();
@@ -218,6 +306,14 @@ function drawBand(band, now) {
     const x = position((band.key === "5" ? 5000 : 2407) + channel * 5, band, width);
     if (x - previousLabel < 20) continue;
     context.fillText(String(channel), x, height - 7);
+    context.save();
+    context.setLineDash([2, 5]);
+    context.globalAlpha = .37;
+    context.beginPath();
+    context.moveTo(x, 10);
+    context.lineTo(x, floor);
+    context.stroke();
+    context.restore();
     previousLabel = x;
   }
 
@@ -227,16 +323,19 @@ function drawBand(band, now) {
   }
 
   for (const point of [...points].sort((a, b) => Number(a.own) - Number(b.own) || a.signal - b.signal)) {
-    const moving = trail?.current.id === point.id && now - trail.at < 2200;
+    const moving = !archive && trail?.current.id === point.id && now - trail.at < 2200;
+    const active = focused?.id === point.id;
+    const accent = active || point.own;
     const progress = moving ? Math.min(1, (now - trail.at) / 690) : 1;
     const shift = moving ? (trail.previous.frequency - point.frequency) * (1 - progress) ** 3 : 0;
     const color = point.own ? palette.gold : moving || point.tracked ? palette.trail : palette.blue;
     point.segments.forEach((segment, index) => {
       const path = geometry(point, segment, index === 0 ? shift : 0);
       const fill = context.createLinearGradient(0, 5, 0, floor);
-      fill.addColorStop(0, color + (point.own ? "43" : "27"));
-      fill.addColorStop(1, color + "04");
-      context.globalAlpha = point.stale ? .35 : 1;
+      fill.addColorStop(0, color + (accent ? "68" : "36"));
+      fill.addColorStop(.68, color + (accent ? "2a" : "13"));
+      fill.addColorStop(1, color + "08");
+      context.globalAlpha = point.stale ? .27 : focused && !active && !point.own ? .44 : 1;
       context.fillStyle = fill;
       context.fill(path);
       if (!point.own && !point.stale && progress === 1) {
@@ -248,16 +347,39 @@ function drawBand(band, now) {
           context.restore();
         }
       }
-      context.lineWidth = point.own || point.tracked ? 1.8 : 1;
+      context.save();
+      context.lineWidth = accent || point.tracked ? 1.8 : 1;
+      if (accent) {
+        context.shadowColor = color + "b0";
+        context.shadowBlur = active ? 20 : 12;
+      }
       context.strokeStyle = color;
       context.stroke(path);
+      context.restore();
     });
     const primary = position(point.frequency + shift, band, width);
     context.fillStyle = color;
     context.fillRect(primary - .75, floor - 4, 1.5, 7);
     context.globalAlpha = 1;
   }
-  if (trail?.current.band === band.key && now - trail.at < 2200) {
+  if (focused) {
+    const x = position(focused.frequency, band, width);
+    const tint = focused.own ? palette.gold : palette.blue;
+    context.save();
+    context.setLineDash([2, 3]);
+    context.strokeStyle = tint + "a0";
+    context.beginPath();
+    context.moveTo(x, 11);
+    context.lineTo(x, floor + 1);
+    context.stroke();
+    context.setLineDash([]);
+    context.fillStyle = tint;
+    context.beginPath();
+    context.arc(x, floor, 3, 0, 2 * Math.PI);
+    context.fill();
+    context.restore();
+  }
+  if (!archive && trail?.current.band === band.key && now - trail.at < 2200) {
     context.save();
     context.globalAlpha = .8 * (1 - (now - trail.at) / 2200);
     context.strokeStyle = palette.trail;
@@ -268,6 +390,73 @@ function drawBand(band, now) {
     context.fillText(trail.previous.channel + " → " + trail.current.channel, 16, 15);
     context.restore();
   }
+}
+
+const receiverBins = 144;
+const waterfallColors = ["#111a18", "#162b29", "#1d4241", "#28615b", "#408778", "#78ad91", "#d2ac6f", "#f0c373"];
+
+function scanBins(snapshot, band) {
+  if (!frameBins.has(snapshot.key)) frameBins.set(snapshot.key, {});
+  const cached = frameBins.get(snapshot.key);
+  if (cached[band.key]) return cached[band.key];
+  const bins = new Uint8Array(receiverBins);
+  const span = band.max - band.min;
+  for (const point of snapshot.points) {
+    if (point.band !== band.key) continue;
+    for (const segment of point.segments) {
+      const left = Math.max(0, Math.floor((segment.Left - band.min) / span * receiverBins));
+      const right = Math.min(receiverBins, Math.ceil((segment.Right - band.min) / span * receiverBins));
+      const center = (segment.Left + segment.Right) / 2;
+      const radius = (segment.Right - segment.Left) / 2;
+      for (let i = left; i < right; i++) {
+        const frequency = band.min + (i + .5) / receiverBins * span;
+        const shape = Math.max(0, 1 - Math.abs(frequency - center) / radius);
+        const signal = Math.round(Math.min(7, point.signal / 100 * 7 * Math.sqrt(shape)));
+        bins[i] = Math.max(bins[i], signal);
+      }
+    }
+  }
+  cached[band.key] = bins;
+  return bins;
+}
+
+function drawWaterfall(band, now) {
+  const { context, width, height } = viewport(byId("waterfall-" + band.suffix));
+  const left = 14;
+  const usable = width - 2 * left;
+  if (!spectrumFrames.length) {
+    context.fillStyle = palette.text;
+    context.font = '11px "Segoe UI", sans-serif';
+    context.fillText("История появится после сканирования", left, 19);
+    return;
+  }
+  const binsWidth = usable / receiverBins;
+  const labelHeight = 13;
+  const rowHeight = (height - labelHeight - 2) / 16;
+  spectrumFrames.forEach((snapshot, index) => {
+    const y = 2 + (16 - spectrumFrames.length + index) * rowHeight;
+    const bins = scanBins(snapshot, band);
+    const latest = index === spectrumFrames.length - 1;
+    const reveal = latest ? Math.min(1, Math.max(0, (now - revealAt) / 530)) : 1;
+    const limit = Math.ceil(receiverBins * reveal);
+    for (let i = 0; i < receiverBins; i++) {
+      context.fillStyle = waterfallColors[i < limit ? bins[i] : 0];
+      context.fillRect(left + i * binsWidth, y, binsWidth + .25, Math.max(1, rowHeight - .32));
+    }
+    if (snapshot.key === frameKey) {
+      context.strokeStyle = palette.gold;
+      context.lineWidth = 1;
+      context.strokeRect(left - .5, y - .15, usable + 1, rowHeight);
+    }
+  });
+  context.fillStyle = palette.text;
+  context.font = '9px "Consolas", monospace';
+  context.textAlign = "left";
+  const time = (snapshot) => new Date(snapshot.at).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  const range = spectrumFrames.length > 1 ?
+    time(spectrumFrames[0]) + " → " + time(spectrumFrames.at(-1)) + " · сверху вниз" :
+    time(spectrumFrames[0]);
+  context.fillText(range, left, height - 1);
 }
 
 function drawLatency(now) {
@@ -341,31 +530,65 @@ function scheduleDraw() {
   if (frame) return;
   frame = requestAnimationFrame((now) => {
     frame = 0;
-    for (const band of sources) drawBand(band, now);
+    for (const band of sources) {
+      drawBand(band, now);
+      drawWaterfall(band, now);
+    }
     const pulse = drawLatency(now);
     if (trail && now - trail.at >= 2200) trail = null;
-    if (trail || pulse) scheduleDraw();
+    if (trail || pulse || now - revealAt < 550) scheduleDraw();
   });
 }
 
 for (const band of sources) {
   const canvas = byId("spectrum-" + band.suffix);
+  const waterfall = byId("waterfall-" + band.suffix);
   const tooltip = byId("tip-" + band.suffix);
-  canvas.addEventListener("pointermove", (event) => {
-    const x = event.offsetX;
+  function nearbyPoint(x) {
     const width = canvas.clientWidth;
-    const close = (state?.points || []).filter((point) => point.band === band.key)
+    return mapPoints().filter((point) => point.band === band.key)
       .map((point) => ({ point, distance: Math.abs(x - position(point.frequency, band, width)) }))
-      .filter((item) => item.distance <= 12)
-      .sort((a, b) => a.distance - b.distance || Number(a.point.stale) - Number(b.point.stale) || b.point.signal - a.point.signal)[0];
-    tooltip.hidden = !close;
-    if (!close) return;
-    const point = close.point;
-    tooltip.textContent = point.name + " · канал " + point.channel + " · " + point.signalText +
-      " · " + (point.measured ? "" : "≈") + point.width + " МГц" + (point.stale ? " · старый замер" : "");
+      .filter((item) => item.distance <= 16)
+      .sort((a, b) => a.distance - b.distance || Number(a.point.stale) - Number(b.point.stale) || b.point.signal - a.point.signal)[0]?.point;
+  }
+
+  canvas.addEventListener("pointermove", (event) => {
+    const point = nearbyPoint(event.offsetX);
+    tooltip.hidden = !point;
+    if (point) tooltip.textContent = pointCaption(point);
   });
   canvas.addEventListener("pointerleave", () => { tooltip.hidden = true; });
+  canvas.addEventListener("click", (event) => {
+    const point = nearbyPoint(event.offsetX);
+    if (point) choosePoint(pinnedPoint === point.id ? null : point.id);
+  });
+  canvas.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      choosePoint(null);
+      return;
+    }
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    const points = mapPoints().filter((point) => point.band === band.key)
+      .sort((a, b) => a.frequency - b.frequency || b.signal - a.signal);
+    if (!points.length) return;
+    event.preventDefault();
+    const current = points.findIndex((point) => point.id === pinnedPoint);
+    const shift = event.key === "ArrowLeft" ? -1 : 1;
+    const index = current < 0 ? (shift > 0 ? 0 : points.length - 1) : (current + shift + points.length) % points.length;
+    choosePoint(points[index].id);
+  });
+  waterfall.addEventListener("click", (event) => {
+    const rowHeight = (waterfall.clientHeight - 15) / 16;
+    const index = Math.floor((event.offsetY - 2) / rowHeight) - (16 - spectrumFrames.length);
+    if (spectrumFrames[index]) chooseFrame(spectrumFrames[index].key);
+  });
 }
+
+historyPosition.addEventListener("input", () => {
+  chooseFrame(spectrumFrames[Number(historyPosition.value)]?.key || null);
+});
+byId("go-live").addEventListener("click", () => chooseFrame(null));
+byId("clear-point").addEventListener("click", () => choosePoint(null));
 addEventListener("resize", scheduleDraw);
 scheduleDraw();
 

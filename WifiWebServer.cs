@@ -30,6 +30,7 @@ namespace WiFi
         private readonly ConcurrentQueue<WebCommand> commands = new ConcurrentQueue<WebCommand>();
         private readonly string host;
         private volatile byte[] state = Encoding.UTF8.GetBytes("{}");
+        private volatile byte[] spectrum = Encoding.UTF8.GetBytes("[]");
         private volatile bool stopped;
 
         private sealed class Asset
@@ -62,6 +63,7 @@ namespace WiFi
         }
 
         public void SetState(string json) { state = Encoding.UTF8.GetBytes(json); }
+        public void SetSpectrum(string json) { spectrum = Encoding.UTF8.GetBytes(json); }
 
         public WebCommand TakeCommand()
         {
@@ -146,6 +148,11 @@ namespace WiFi
                 if (target == "/api/state")
                 {
                     Send(stream, "200 OK", "application/json; charset=utf-8", state);
+                    return;
+                }
+                if (target == "/api/spectrum")
+                {
+                    Send(stream, "200 OK", "application/json; charset=utf-8", spectrum);
                     return;
                 }
                 if (assets.TryGetValue(target, out asset))

@@ -57,6 +57,12 @@ function Get-ConnectedAddresses {
     }
 }
 
+function Get-5GHzBlockStart([int] $Channel) {
+    foreach ($start in @(36, 52, 100, 116, 132, 149, 165)) {
+        if ($Channel -ge $start -and $Channel -le ($start + 12)) { return $start }
+    }
+}
+
 function Get-ChannelScore {
     param([int] $Channel, [string] $Band, [object[]] $Neighbors)
 
@@ -67,15 +73,9 @@ function Get-ChannelScore {
             $overlap = [Math]::Max(0.0, 1 - $distance / 5.0)
         } else {
             # The scan does not report channel width. Reserve the surrounding 80 MHz block.
-            $overlap = 0
-            foreach ($start in @(36, 52, 100, 116, 132, 149, 165)) {
-                if ($Channel -ge $start -and $Channel -le ($start + 12) -and
-                    $point.Channel -ge $start -and $point.Channel -le ($start + 12)) {
-                    $overlap = 1
-                    break
-                }
-            }
-            if ($distance -eq 0) { $overlap = 1 }
+            $block = Get-5GHzBlockStart $Channel
+            $neighborBlock = Get-5GHzBlockStart $point.Channel
+            $overlap = [int] ($distance -eq 0 -or ($block -and $block -eq $neighborBlock))
         }
         $score += [Math]::Pow($point.Signal / 100.0, 2) * $overlap * 100
     }
@@ -83,7 +83,7 @@ function Get-ChannelScore {
 }
 
 function Get-ChannelPlan {
-    param([object[]] $Points, [string] $Band, [string[]] $Connected)
+    param([object[]] $Points, [string] $Band, [string[]] $Connected, [hashtable] $PastScores = @{})
 
     $visible = @($Points | Where-Object Band -eq $Band)
     $neighbors = @($visible | Where-Object { -not $_.Own })
@@ -96,18 +96,27 @@ function Get-ChannelPlan {
     $observed = @($visible | ForEach-Object { $_.Channel })
     $channels = @($candidates) + $observed | Sort-Object -Unique
     $rows = foreach ($channel in $channels) {
+        $score = Get-ChannelScore $channel $Band $neighbors
+        $past = $PastScores[[int] $channel]
         [pscustomobject] @{
             Channel = $channel
             Count = @($neighbors | Where-Object Channel -eq $channel).Count
-            Score = Get-ChannelScore $channel $Band $neighbors
+            Score = $score
+            Rank = $score + [Math]::Min(15.0, [double] $past * 0.15)
             Candidate = $channel -in $candidates
             Current = $null -ne $homePoint -and $channel -eq $homePoint.Channel
         }
     }
 
-    $best = $rows | Where-Object Candidate | Sort-Object -Property Score, Channel | Select-Object -First 1
+    $best = $rows | Where-Object Candidate | Sort-Object -Property Rank, Score, Channel | Select-Object -First 1
     $current = $rows | Where-Object Current | Select-Object -First 1
     $improves = $null -ne $current -and $current.Score -gt 0 -and
         $best.Score -le $current.Score * 0.7
-    [pscustomobject] @{ Home = $homePoint; Rows = $rows; Best = $best; Improves = $improves }
+    [pscustomobject] @{
+        Home = $homePoint
+        Rows = $rows
+        Best = $best
+        Improves = $improves
+        VisibleCount = $visible.Count
+    }
 }

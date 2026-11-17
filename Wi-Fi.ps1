@@ -1,6 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Scan.ps1')
 . (Join-Path $PSScriptRoot 'Monitor.ps1')
+. (Join-Path $PSScriptRoot 'Visuals.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -11,6 +12,22 @@ $white = [Drawing.Color]::FromArgb(239, 233, 220)
 $muted = [Drawing.Color]::FromArgb(171, 174, 181)
 $gold = [Drawing.Color]::FromArgb(240, 193, 100)
 $script:points = @()
+$theme = @{
+    Muted = $muted
+    Gold = $gold
+    Neighbor = [Drawing.Color]::FromArgb(112, 177, 221)
+    Glow = [Drawing.Color]::FromArgb(255, 132, 58)
+    Loss = [Drawing.Color]::FromArgb(255, 91, 111)
+    Trail = [Drawing.Color]::FromArgb(171, 154, 255)
+}
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$script:trail = $null
+$script:pulseUntil = 0.0
+$script:latencySamples = @()
+$script:gateway = $null
+$script:pingTarget = $null
+$script:pingTask = $null
+$script:nextProbe = 0.0
 $script:streak = @{}
 $script:plans = @{}
 $script:worker = $null
@@ -125,17 +142,40 @@ $refresh = New-WifiButton 'Обновить' 105
 $toolbar.Controls.AddRange(@($brand, $homeLabel, $homeInput, $refresh))
 $page.Controls.Add($toolbar, 0, 0)
 
-$diagnostics = New-Grid 1 2
-$diagnostics.BackColor = $surface
-[void] $diagnostics.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 48))
-[void] $diagnostics.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 52))
-$probeValues = New-Label 'До роутера  ·  Ожидание замера                       До интернета  ·  Ожидание замера' $white
-$linkLabel = New-Label '' $muted
-$probeValues.Margin = [Windows.Forms.Padding]::new(9, 0, 4, 0)
-$linkLabel.Margin = $probeValues.Margin
-$diagnostics.Controls.Add($probeValues, 0, 0)
-$diagnostics.Controls.Add($linkLabel, 0, 1)
-$page.Controls.Add($diagnostics, 0, 1)
+function New-GraphPanel {
+    $panel = New-Object Windows.Forms.Panel
+    $panel.Dock = 'Fill'
+    $flags = [Reflection.BindingFlags]'Instance, NonPublic'
+    [Windows.Forms.Control].GetProperty('DoubleBuffered', $flags).SetValue($panel, $true, $null)
+    $panel.Add_Resize({ param($sender, $eventArgs); $sender.Invalidate() })
+    $panel
+}
+
+$diagnosticArea = New-Grid 2 1
+$diagnosticArea.BackColor = $surface
+[void] $diagnosticArea.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent', 59))
+[void] $diagnosticArea.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent', 41))
+$diagnostics = New-Grid 1 3
+[void] $diagnostics.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 19))
+[void] $diagnostics.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 19))
+[void] $diagnostics.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 100))
+$routerProbeLabel = New-Label 'До роутера  ·  Ожидание замера' $white 9
+$internetProbeLabel = New-Label 'До интернета  ·  Ожидание замера' $white 9
+$linkLabel = New-Label '' $muted 9
+foreach ($label in @($routerProbeLabel, $internetProbeLabel, $linkLabel)) {
+    $label.Margin = [Windows.Forms.Padding]::new(9, 0, 0, 0)
+}
+$diagnostics.Controls.Add($routerProbeLabel, 0, 0)
+$diagnostics.Controls.Add($internetProbeLabel, 0, 1)
+$diagnostics.Controls.Add($linkLabel, 0, 2)
+$diagnosticArea.Controls.Add($diagnostics, 0, 0)
+$latencyPanel = New-GraphPanel
+$latencyPanel.Add_Paint({
+    param($sender, $eventArgs)
+    Draw-LatencyGraph $sender $eventArgs.Graphics $script:latencySamples $clock.Elapsed.TotalSeconds $theme
+})
+$diagnosticArea.Controls.Add($latencyPanel, 1, 0)
+$page.Controls.Add($diagnosticArea, 0, 1)
 
 $maps = New-Grid 2 1
 [void] $maps.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent', 50))
@@ -148,20 +188,38 @@ $advice = New-Grid 2 1
 [void] $advice.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent', 50))
 [void] $advice.ColumnStyles.Add([Windows.Forms.ColumnStyle]::new('Percent', 50))
 $page.Controls.Add($advice, 0, 3)
+$toolTip = New-Object Windows.Forms.ToolTip
 $column = 0
 foreach ($band in @('2.4', '5')) {
     $card = New-Grid 1 2
     $card.BackColor = $surface
     [void] $card.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 28))
     [void] $card.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 100))
-    $headline = New-Label "$($band.Replace('.', ',')) ГГц   ·   Оценка помех по каналам" $white
+    $headline = New-Label "$($band.Replace('.', ',')) ГГц   ·   Полоса по оценке" $white
     $headline.Margin = [Windows.Forms.Padding]::new(8, 0, 0, 0)
     $card.Controls.Add($headline, 0, 0)
-    $panel = New-Object Windows.Forms.Panel
-    $panel.Dock = 'Fill'
+    $panel = New-GraphPanel
     $panel.Tag = $band
-    $panel.Add_Paint({ param($sender, $eventArgs); Draw-Channels $sender $eventArgs.Graphics })
-    $panel.Add_Resize({ param($sender, $eventArgs); $sender.Invalidate() })
+    $panel.Add_Paint({
+        param($sender, $eventArgs)
+        $currentBand = [string] $sender.Tag
+        $visible = @($script:points | Where-Object Band -eq $currentBand)
+        $trail = if ($script:trail -and $script:trail.Band -eq $currentBand) { $script:trail }
+        Draw-Spectrum $sender $eventArgs.Graphics $visible $script:plans[$currentBand] $trail $clock.Elapsed.TotalSeconds $theme
+    })
+    $panel.Add_MouseMove({
+        param($sender, $eventArgs)
+        $currentBand = [string] $sender.Tag
+        $axis = Get-SpectrumAxis $sender
+        $visible = @($script:points | Where-Object Band -eq $currentBand)
+        $nearest = Get-SpectrumHover $axis $visible $eventArgs.X
+        $caption = if ($nearest) {
+            $ssid = if ($nearest.SSID) { $nearest.SSID } else { 'Скрытая сеть' }
+            $footprint = Get-SignalFootprint $nearest.Band $nearest.Channel
+            "$ssid · канал $($nearest.Channel) · сигнал $($nearest.Signal)% · оценка полосы $($footprint.Width) МГц"
+        } else { '' }
+        if ($toolTip.GetToolTip($sender) -ne $caption) { $toolTip.SetToolTip($sender, $caption) }
+    })
     $card.Controls.Add($panel, 0, 1)
     $maps.Controls.Add($card, $column, 0)
     $mapPanels[$band] = $panel
@@ -226,45 +284,6 @@ function Get-HeatColor([double] $Score, [bool] $Measured) {
     if (-not $Measured) { return [Drawing.Color]::FromArgb(57, 59, 65) }
     $intensity = [Math]::Min(1.0, $Score / 100.0)
     [Drawing.Color]::FromArgb([int] (59 + 177 * $intensity), [int] (51 + 121 * $intensity), [int] (38 + 40 * $intensity))
-}
-
-function Draw-Channels($Panel, $Graphics) {
-    $plan = $script:plans[[string] $Panel.Tag]
-    $mutedBrush = [Drawing.SolidBrush]::new($muted)
-    $goldPen = [Drawing.Pen]::new($gold, 2)
-    $goldBrush = [Drawing.SolidBrush]::new($gold)
-    try {
-        if (-not $plan -or -not $plan.VisibleCount) {
-            $Graphics.DrawString('Сети не обнаружены', $Panel.Font, $mutedBrush, 9, 9)
-            return
-        }
-        $rows = @($plan.Rows)
-        $graphWidth = [Math]::Max(1.0, $Panel.ClientSize.Width - 16.0)
-        $step = $graphWidth / $rows.Count
-        $scale = [Math]::Max(100.0, [double] (($rows | Measure-Object Score -Maximum).Maximum))
-        $bottomY = [Math]::Max(27, $Panel.ClientSize.Height - 23)
-        $barWidth = [int] [Math]::Max(3.0, [Math]::Min(29.0, $step - 4.0))
-        for ($i = 0; $i -lt $rows.Count; $i++) {
-            $row = $rows[$i]
-            $x = [int] (8 + $i * $step + ($step - $barWidth) / 2)
-            $height = [int] [Math]::Max(3.0, ($bottomY - 25) * $row.Score / $scale)
-            $fill = [Drawing.SolidBrush]::new((Get-HeatColor $row.Score $true))
-            try { $Graphics.FillRectangle($fill, $x, $bottomY - $height, $barWidth, $height) }
-            finally { $fill.Dispose() }
-            if ($row.Current) { $Graphics.DrawRectangle($goldPen, $x, $bottomY - $height, $barWidth, $height) }
-            $textBrush = if ($row.Current) { $goldBrush } else { $mutedBrush }
-            if ($step -ge 19 -or $row.Current -or $i % 2 -eq 0) {
-                $Graphics.DrawString([string] $row.Channel, $Panel.Font, $textBrush, [single] ($x - 1), [single] ($bottomY + 3))
-                if ($step -ge 28 -and $row.Score -gt 0) {
-                    $Graphics.DrawString([string] $row.Score, $Panel.Font, $textBrush, [single] $x, [single] ($bottomY - $height - 16))
-                }
-            }
-        }
-    } finally {
-        $mutedBrush.Dispose()
-        $goldPen.Dispose()
-        $goldBrush.Dispose()
-    }
 }
 
 function Draw-Heatmap($Panel, $Graphics) {
@@ -415,7 +434,8 @@ function Format-Probe($Probe) {
 }
 
 function Show-Diagnostics($Snapshot, [string] $State) {
-    $probeValues.Text = "До роутера  ·  $(Format-Probe $Snapshot.Router)       До интернета  ·  $(Format-Probe $Snapshot.Internet)"
+    $routerProbeLabel.Text = "До роутера  ·  $(Format-Probe $Snapshot.Router)"
+    $internetProbeLabel.Text = "До интернета  ·  $(Format-Probe $Snapshot.Internet)"
     $linkLabel.Text = switch ($State) {
         'unknown' { 'Для диагностики нужен доступный шлюз IPv4 через Wi-Fi.' }
         'router-no-reply' { 'Роутер не ответил на ICMP. Это может зависеть от его настроек.' }
@@ -462,6 +482,66 @@ $poll = New-Object Windows.Forms.Timer
 $poll.Interval = 150
 $autoRefresh = New-Object Windows.Forms.Timer
 $autoRefresh.Interval = 30000
+$animation = New-Object Windows.Forms.Timer
+$animation.Interval = 33
+$probeTimer = New-Object Windows.Forms.Timer
+$probeTimer.Interval = 100
+$ping = [Net.NetworkInformation.Ping]::new()
+
+function Set-ProbeGateway($Address) {
+    if ([string] $Address -eq [string] $script:gateway) { return }
+    $script:gateway = $Address
+    $script:latencySamples = @()
+    $script:pulseUntil = 0.0
+    $script:nextProbe = 0.0
+    $latencyPanel.Invalidate()
+}
+
+$probeTimer.Add_Tick({
+    $now = $clock.Elapsed.TotalSeconds
+    if ($script:pingTask -and $script:pingTask.IsCompleted) {
+        $task = $script:pingTask
+        $script:pingTask = $null
+        if ($task.Status -eq 'Faulted') { [void] $task.Exception }
+        if ($task.Status -eq 'RanToCompletion' -and [string] $script:pingTarget -eq [string] $script:gateway) {
+            $reply = $task.Result
+            $lost = $reply.Status -ne 'Success'
+            $milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
+            $level = Get-LatencyLevel $milliseconds $lost
+            $script:latencySamples = @($script:latencySamples | Where-Object { $now - $_.At -le 60 }) +
+                @([pscustomobject] @{ At = $now; Milliseconds = $milliseconds; Level = $level })
+            if ($level -ne 'normal') {
+                $script:pulseUntil = $now + 1.1
+                $animation.Start()
+            }
+            $latencyPanel.Invalidate()
+        }
+    }
+    if ($script:gateway -and -not $script:pingTask -and $now -ge $script:nextProbe) {
+        $script:nextProbe = $now + 1.0
+        $script:pingTarget = $script:gateway
+        try {
+            $script:pingTask = $ping.SendPingAsync($script:pingTarget, 650)
+        } catch [Net.NetworkInformation.PingException] {
+            $script:pingTask = $null
+        }
+    }
+})
+
+$animation.Add_Tick({
+    $now = $clock.Elapsed.TotalSeconds
+    $pulse = $now -lt $script:pulseUntil
+    if ($script:trail) {
+        $band = $script:trail.Band
+        if ($now - $script:trail.Started -ge 2.2) { $script:trail = $null }
+        $mapPanels[$band].Invalidate()
+    }
+    if ($script:pulseUntil -gt 0) {
+        $latencyPanel.Invalidate()
+        if (-not $pulse) { $script:pulseUntil = 0.0 }
+    }
+    if (-not $pulse -and -not $script:trail) { $animation.Stop() }
+})
 
 function Start-Scan {
     if ($script:worker) { return }
@@ -483,6 +563,12 @@ $poll.Add_Tick({
         $connectedAddresses = @(Get-ConnectedAddresses $result.Interfaces)
         $script:points = @(Get-WifiPoints $result.Networks $connectedAddresses $homeInput.Text)
         $at = Get-Date
+        $trail = New-ChannelTrail $script:history.Tracked $script:points $clock.Elapsed.TotalSeconds
+        if ($trail) {
+            $script:trail = $trail
+            $animation.Start()
+        }
+        Set-ProbeGateway $result.Diagnostics.Gateway
         $state = Get-LinkState $result.Diagnostics
         if ($state -ne $script:linkState) {
             if ($state -eq 'local') { Add-MonitorEvent $script:history $at 'Задержка или потери до роутера.' }
@@ -504,6 +590,7 @@ $poll.Add_Tick({
         $status.Text = "Замер $($at.ToString('HH:mm:ss'))  ·  Точек: $($script:points.Count)  ·  Золотой контур — свой канал. $script:storageNote"
     } catch {
         $script:streak.Clear()
+        Set-ProbeGateway $null
         foreach ($band in $adviceLabels.Keys) { $adviceLabels[$band].Text = 'Ожидание свежего замера' }
         $status.Text = if ($script:lastScanAt) {
             "Обновление не удалось. Последний замер $($script:lastScanAt.ToString('HH:mm:ss'))."
@@ -535,6 +622,10 @@ $trackButton.Add_Click({
         Add-MonitorEvent $script:history $at "Наблюдение завершено: $($tracked.SSID)."
         $script:history.Tracked = $null
     }
+    if ($script:trail) {
+        $mapPanels[$script:trail.Band].Invalidate()
+        $script:trail = $null
+    }
     Write-History
     Show-Tracking
     Show-Events
@@ -548,12 +639,16 @@ $homeInput.Add_KeyDown({
     }
 })
 $autoRefresh.Add_Tick({ Start-Scan })
-$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan; $autoRefresh.Start() })
+$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan; $autoRefresh.Start(); $probeTimer.Start() })
 try {
     [void] $form.ShowDialog()
 } finally {
     $autoRefresh.Dispose()
     $poll.Dispose()
+    $animation.Dispose()
+    $probeTimer.Dispose()
+    $ping.Dispose()
+    $toolTip.Dispose()
     if ($script:worker) { $script:worker.Dispose() }
     $form.Dispose()
     $mutex.ReleaseMutex()

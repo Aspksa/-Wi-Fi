@@ -57,6 +57,12 @@ function Get-ConnectedAddresses {
     }
 }
 
+function Get-5GHzBlockStart([int] $Channel) {
+    foreach ($start in @(36, 52, 100, 116, 132, 149, 165)) {
+        if ($Channel -ge $start -and $Channel -le ($start + 12)) { return $start }
+    }
+}
+
 function Get-ChannelScore {
     param([int] $Channel, [string] $Band, [object[]] $Neighbors)
 
@@ -67,15 +73,9 @@ function Get-ChannelScore {
             $overlap = [Math]::Max(0.0, 1 - $distance / 5.0)
         } else {
             # The scan does not report channel width. Reserve the surrounding 80 MHz block.
-            $overlap = 0
-            foreach ($start in @(36, 52, 100, 116, 132, 149, 165)) {
-                if ($Channel -ge $start -and $Channel -le ($start + 12) -and
-                    $point.Channel -ge $start -and $point.Channel -le ($start + 12)) {
-                    $overlap = 1
-                    break
-                }
-            }
-            if ($distance -eq 0) { $overlap = 1 }
+            $block = Get-5GHzBlockStart $Channel
+            $neighborBlock = Get-5GHzBlockStart $point.Channel
+            $overlap = [int] ($distance -eq 0 -or ($block -and $block -eq $neighborBlock))
         }
         $score += [Math]::Pow($point.Signal / 100.0, 2) * $overlap * 100
     }

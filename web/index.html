@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Wi Fi · Монитор эфира</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="Wi Fi, главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Wi<span>Fi</span></a>
+      <div class="masthead-actions">
+        <span class="connection" id="connection"><i aria-hidden="true"></i><span>Подключение</span></span>
+        <button class="refresh" id="refresh" type="button"><span aria-hidden="true">↻</span> Обновить</button>
+      </div>
+    </header>
+
+    <section class="intro" aria-labelledby="page-title">
+      <div>
+        <h1 id="page-title">Монитор эфира</h1>
+        <p id="scan-meta" class="subtext">Ожидание первого замера</p>
+      </div>
+      <form id="home-form" class="home-form">
+        <label for="home">Своя сеть</label>
+        <div class="input-group">
+          <input id="home" maxlength="64" autocomplete="off" placeholder="Имя Wi-Fi">
+          <button type="submit">Применить</button>
+        </div>
+      </form>
+    </section>
+    <p id="notice" class="notice" role="status" hidden></p>
+
+    <div class="main-grid">
+      <section class="panel spectrum" aria-labelledby="spectrum-title">
+        <div class="panel-heading">
+          <h2 id="spectrum-title">Карта каналов</h2>
+          <div class="legend"><span><i class="own"></i>Своя сеть</span><span><i class="neighbor"></i>Соседи</span><span><i class="overlap"></i>Пересечение</span></div>
+        </div>
+        <div class="spectrum-band">
+          <div class="band-heading"><h3>2,4 <small>ГГц</small></h3><p id="band-24">Ожидание</p></div>
+          <div class="plot-wrap">
+            <canvas id="spectrum-24" role="img" aria-label="Уровни сигнала соседних сетей на каналах 2,4 ГГц"></canvas>
+            <p class="tooltip" id="tip-24" hidden></p>
+          </div>
+        </div>
+        <div class="spectrum-band">
+          <div class="band-heading"><h3>5 <small>ГГц</small></h3><p id="band-5">Ожидание</p></div>
+          <div class="plot-wrap">
+            <canvas id="spectrum-5" role="img" aria-label="Уровни сигнала соседних сетей на каналах 5 ГГц"></canvas>
+            <p class="tooltip" id="tip-5" hidden></p>
+          </div>
+        </div>
+      </section>
+
+      <div class="sidebar">
+        <section class="panel diagnostics" aria-labelledby="diagnostics-title">
+          <div class="panel-heading"><h2 id="diagnostics-title">Диагностика</h2><span class="tag">60 с</span></div>
+          <div class="metrics">
+            <div><span>До роутера</span><strong id="router-value">—</strong><small id="router-loss">Нет замера</small></div>
+            <div><span>До интернета</span><strong id="internet-value">—</strong><small id="internet-loss">Нет замера</small></div>
+          </div>
+          <canvas id="latency" role="img" aria-label="График отклика роутера за последнюю минуту"></canvas>
+          <p id="link" class="link-message">Ожидание подключения.</p>
+        </section>
+        <section class="panel choices" aria-labelledby="advice-title">
+          <div class="panel-heading"><h2 id="advice-title">Рекомендации</h2></div>
+          <div class="choice"><span>2,4 ГГц</span><p id="advice-24">Ожидание первого замера.</p></div>
+          <div class="choice"><span>5 ГГц</span><p id="advice-5">Ожидание первого замера.</p></div>
+        </section>
+      </div>
+    </div>
+
+    <section class="panel heat" aria-labelledby="heat-title">
+      <div class="panel-heading"><h2 id="heat-title">История помех</h2><span class="tag">24 часа</span></div>
+      <div id="heat-grid" class="heat-grid"></div>
+    </section>
+
+    <div class="bottom-grid">
+      <section class="panel points" aria-labelledby="points-title">
+        <div class="panel-heading">
+          <h2 id="points-title">Точки доступа <small id="point-count"></small></h2>
+          <button type="button" id="stop-tracking" class="quiet" hidden>Остановить слежение</button>
+        </div>
+        <p id="tracking-name" class="tracking" hidden></p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th scope="col">Сеть</th><th scope="col">ГГц</th><th scope="col">Канал</th><th scope="col">Сигнал</th><th scope="col"><span class="sr-only">Действие</span></th></tr></thead>
+            <tbody id="points"><tr><td colspan="5" class="empty">Ожидание сканирования.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="panel events" aria-labelledby="events-title">
+        <div class="panel-heading"><h2 id="events-title">Журнал событий</h2></div>
+        <ol id="events"><li class="empty">Событий пока нет.</li></ol>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

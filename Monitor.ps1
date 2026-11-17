@@ -37,7 +37,7 @@ function Add-MonitorEvent($History, [datetime] $At, [string] $Message) {
 function Update-TrackedPoint($History, [object[]] $Points, $Plans, [datetime] $At) {
     $tracked = $History.Tracked
     if (-not $tracked) { return }
-    $point = $Points | Where-Object { $_.BSSID -eq $tracked.BSSID -and $_.Band -eq $tracked.Band } |
+    $point = $Points | Where-Object { $_.BSSID -eq $tracked.BSSID -and $_.Band -eq $tracked.Band -and $_.Fresh -ne $false } |
         Sort-Object Signal -Descending | Select-Object -First 1
     if (-not $point) { return }
     if ($tracked.Channel -ne $point.Channel) {
@@ -46,8 +46,9 @@ function Update-TrackedPoint($History, [object[]] $Points, $Plans, [datetime] $A
     }
     $ownPoint = $Plans[$tracked.Band].Home
     if (-not $ownPoint) { return }
-    $channelEstimate = [pscustomobject] @{ Channel = $point.Channel; Signal = 100 }
-    $overlap = (Get-ChannelScore $ownPoint.Channel $tracked.Band @($channelEstimate)) -gt 0
+    $ownFootprint = Get-SignalFootprint $tracked.Band $ownPoint.Channel $ownPoint
+    $neighborFootprint = Get-SignalFootprint $tracked.Band $point.Channel $point
+    $overlap = [bool] (Get-SignalOverlap $ownFootprint $neighborFootprint)
     if ($null -ne $tracked.Overlap -and $tracked.Overlap -ne $overlap) {
         $message = if ($overlap) { 'появилось расчётное пересечение' } else { 'расчётное пересечение исчезло' }
         Add-MonitorEvent $History $At "$($tracked.SSID) · $message с твоим каналом $($ownPoint.Channel)."

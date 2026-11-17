@@ -242,13 +242,13 @@ function Get-WifiNetworkKey($Point) {
 
 function Get-WifiRadioContext([object[]] $Points, [string[]] $Connected, $Previous, [long] $Now) {
     if ($Connected.Count -ne 1) { return }
-    $ownPoint = $Points | Where-Object BSSID -eq $Connected[0] | Select-Object -First 1
+    $ownPoint = $Points | Where-Object { $_.BSSID -eq $Connected[0] -and $_.Fresh -ne $false } | Select-Object -First 1
     if (-not $ownPoint) { return }
     $network = Get-WifiNetworkKey $ownPoint
-    $footprint = Get-SignalFootprint $ownPoint.Band $ownPoint.Channel
+    $footprint = Get-SignalFootprint $ownPoint.Band $ownPoint.Channel $ownPoint
     $neighbors = foreach ($point in $Points) {
-        if (-not $point.Own -and $point.Band -eq $ownPoint.Band -and $point.Signal -ge 65 -and
-                (Get-SignalOverlap $footprint (Get-SignalFootprint $point.Band $point.Channel))) {
+        if (-not $point.Own -and $point.Fresh -ne $false -and $point.Band -eq $ownPoint.Band -and $point.Signal -ge 65 -and
+                (Get-SignalOverlap $footprint (Get-SignalFootprint $point.Band $point.Channel $point))) {
             "$($point.BSSID)/$($point.Channel)"
         }
     }
@@ -261,7 +261,7 @@ function Get-WifiRadioContext([object[]] $Points, [string[]] $Connected, $Previo
     }
     [pscustomobject] @{
         At = $Now; Network = $network; Band = $ownPoint.Band; Signal = $ownPoint.Signal; Channel = $ownPoint.Channel
-        Signature = $signature; ChangedAt = $changedAt
+        Signature = $signature; ChangedAt = $changedAt; ObservedAt = $ownPoint.ObservedAt
     }
 }
 

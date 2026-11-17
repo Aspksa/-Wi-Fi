@@ -1,28 +1,10 @@
-﻿function Get-SignalFootprint([string] $Band, [int] $Channel) {
-    if ($Band -eq '2.4') {
-        $primary = if ($Channel -eq 14) { 2484 } else { 2407 + $Channel * 5 }
-        return [pscustomobject] @{ Primary = $primary; Left = $primary - 10; Right = $primary + 10; Width = 20 }
-    }
-    $primary = 5000 + $Channel * 5
-    $block = Get-5GHzBlockStart $Channel
-    if ($null -ne $block) {
-        $left = 5000 + $block * 5 - 10
-        return [pscustomobject] @{ Primary = $primary; Left = $left; Right = $left + 80; Width = 80 }
-    }
-    [pscustomobject] @{ Primary = $primary; Left = $primary - 10; Right = $primary + 10; Width = 20 }
-}
-
-function Get-SignalOverlap($First, $Second) {
-    $left = [Math]::Max([int] $First.Left, [int] $Second.Left)
-    $right = [Math]::Min([int] $First.Right, [int] $Second.Right)
-    if ($right -gt $left) { [pscustomobject] @{ Left = $left; Right = $right } }
-}
-
-function New-ChannelTrail($Tracked, [object[]] $Points, [double] $At) {
+﻿function New-ChannelTrail($Tracked, [object[]] $Points, [double] $At, [object[]] $Previous) {
     if (-not $Tracked) { return }
-    $point = $Points | Where-Object { $_.BSSID -eq $Tracked.BSSID -and $_.Band -eq $Tracked.Band } |
+    $point = $Points | Where-Object { $_.BSSID -eq $Tracked.BSSID -and $_.Band -eq $Tracked.Band -and $_.Fresh -ne $false } |
         Sort-Object Signal -Descending | Select-Object -First 1
     if ($point -and $point.Channel -ne $Tracked.Channel) {
+        $origin = $Previous | Where-Object { $_.BSSID -eq $Tracked.BSSID -and $_.Band -eq $Tracked.Band -and
+            $_.Channel -eq $Tracked.Channel } | Select-Object -First 1
         [pscustomobject] @{
             BSSID = $point.BSSID
             Band = $point.Band
@@ -30,6 +12,7 @@ function New-ChannelTrail($Tracked, [object[]] $Points, [double] $At) {
             To = $point.Channel
             Signal = $point.Signal
             Started = $At
+            Origin = Get-SignalFootprint $point.Band $Tracked.Channel $origin
         }
     }
 }
@@ -53,7 +36,7 @@ function Get-SpectrumHover($Axis, [object[]] $Points, [int] $X) {
     $nearest = $null
     $bestDistance = 12.0
     foreach ($point in $Points) {
-        $footprint = Get-SignalFootprint $point.Band $point.Channel
+        $footprint = Get-SignalFootprint $point.Band $point.Channel $point
         $distance = [Math]::Abs($X - (Get-SpectrumX $Axis $footprint.Primary))
         if ($distance -lt $bestDistance -or ($distance -eq $bestDistance -and $point.Signal -gt $nearest.Signal)) {
             $nearest = $point
@@ -81,7 +64,7 @@ function Draw-Spectrum($Panel, $Graphics, [object[]] $Points, $Plan, $Trail, [do
     $space = [Math]::Max(1.0, $floor - 14.0)
     $grid = [Drawing.Pen]::new([Drawing.Color]::FromArgb(65, 70, 80))
     $text = [Drawing.SolidBrush]::new($Theme.Muted)
-    $ownShape = $null
+    $ownShapes = @()
     try {
         for ($i = 0; $i -le 3; $i++) {
             $y = [single] ($floor - $space * $i / 3)
@@ -91,75 +74,79 @@ function Draw-Spectrum($Panel, $Graphics, [object[]] $Points, $Plan, $Trail, [do
             $Graphics.DrawString('Сети не обнаружены', $Panel.Font, $text, [single] 18, [single] 12)
             return
         }
-        $ownFootprint = $null
         if ($Plan.Home) {
-            $ownFootprint = Get-SignalFootprint $band $Plan.Home.Channel
-            $ownShape = New-SignalArc (Get-SpectrumX $axis $ownFootprint.Left) (Get-SpectrumX $axis $ownFootprint.Right) $floor (
-                $space * [Math]::Max(0.06, $Plan.Home.Signal / 100.0)
-            )
+            $ownFootprint = Get-SignalFootprint $band $Plan.Home.Channel $Plan.Home
+            $rise = $space * [Math]::Max(0.06, $Plan.Home.Signal / 100.0)
+            foreach ($segment in (Get-SignalSegments $ownFootprint)) {
+                $ownShapes += New-SignalArc (Get-SpectrumX $axis $segment.Left) (Get-SpectrumX $axis $segment.Right) $floor $rise
+            }
         }
         $age = if ($Trail) { [Math]::Max(0.0, $Now - $Trail.Started) } else { 3.0 }
         foreach ($point in ($Points | Sort-Object -Property Own, Signal)) {
-            $footprint = Get-SignalFootprint $band $point.Channel
-            $primary = $footprint.Primary
-            $left = $footprint.Left
-            $right = $footprint.Right
+            $footprint = Get-SignalFootprint $band $point.Channel $point
             $tint = if ($point.Own) { $Theme.Gold } else { $Theme.Neighbor }
             $moving = $Trail -and $age -lt 2.2 -and $point.BSSID -eq $Trail.BSSID -and $point.Channel -eq $Trail.To
+            $shift = 0.0
             if ($moving) {
-                $origin = Get-SignalFootprint $band $Trail.From
                 $progress = [Math]::Min(1.0, $age / 0.75)
-                $eased = 1.0 - [Math]::Pow(1.0 - $progress, 3)
-                $left = $origin.Left + ($left - $origin.Left) * $eased
-                $right = $origin.Right + ($right - $origin.Right) * $eased
-                $primary = $origin.Primary + ($primary - $origin.Primary) * $eased
+                $shift = ($Trail.Origin.Primary - $footprint.Primary) * [Math]::Pow(1.0 - $progress, 3)
                 $tint = $Theme.Trail
             }
             $rise = $space * [Math]::Max(0.06, $point.Signal / 100.0)
-            $arc = New-SignalArc (Get-SpectrumX $axis $left) (Get-SpectrumX $axis $right) $floor $rise
-            $outline = [Drawing.Pen]::new([Drawing.Color]::FromArgb(201, $tint), [single] $(if ($point.Own -or $moving) { 2 } else { 1 }))
-            $fill = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb($(if ($point.Own) { 43 } else { 21 }), $tint))
+            $opacity = if ($point.Fresh -eq $false) { 83 } else { 201 }
+            $outline = [Drawing.Pen]::new([Drawing.Color]::FromArgb($opacity, $tint), [single] $(if ($point.Own -or $moving) { 2 } else { 1 }))
+            $fillOpacity = if ($point.Fresh -eq $false) { 8 } elseif ($point.Own) { 43 } else { 21 }
+            $fill = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb($fillOpacity, $tint))
             try {
-                $Graphics.FillPath($fill, $arc)
-                $overlap = if ($ownShape -and -not $point.Own -and (-not $moving -or $age -ge 0.75)) {
-                    Get-SignalOverlap $ownFootprint $footprint
-                }
-                if ($overlap) {
-                    $oldClip = $Graphics.Save()
-                    $light = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb([int] (20 + $point.Signal * 0.65), $Theme.Glow))
+                $arcShift = $shift
+                foreach ($segment in (Get-SignalSegments $footprint)) {
+                    $arc = New-SignalArc (Get-SpectrumX $axis ($segment.Left + $arcShift)) (
+                        Get-SpectrumX $axis ($segment.Right + $arcShift)
+                    ) $floor $rise
+                    $arcShift = 0.0
                     try {
-                        $Graphics.SetClip($ownShape, [Drawing.Drawing2D.CombineMode]::Intersect)
-                        $Graphics.FillPath($light, $arc)
-                    } finally {
-                        $Graphics.Restore($oldClip)
-                        $light.Dispose()
-                    }
+                        $Graphics.FillPath($fill, $arc)
+                        if (-not $point.Own -and $point.Fresh -ne $false -and (-not $moving -or $age -ge 0.75) -and
+                                $ownShapes.Count -and (Get-SignalOverlap $ownFootprint $footprint)) {
+                            foreach ($ownShape in $ownShapes) {
+                                $oldClip = $Graphics.Save()
+                                $light = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb([int] (20 + $point.Signal * 0.65), $Theme.Glow))
+                                try {
+                                    $Graphics.SetClip($ownShape, [Drawing.Drawing2D.CombineMode]::Intersect)
+                                    $Graphics.FillPath($light, $arc)
+                                } finally {
+                                    $Graphics.Restore($oldClip)
+                                    $light.Dispose()
+                                }
+                            }
+                        }
+                        $Graphics.DrawPath($outline, $arc)
+                    } finally { $arc.Dispose() }
                 }
-                $Graphics.DrawPath($outline, $arc)
-                $mark = Get-SpectrumX $axis $primary
+                $mark = Get-SpectrumX $axis ($footprint.Primary + $shift)
                 $Graphics.DrawLine($outline, $mark, [single] ($floor - 5), $mark, [single] ($floor + 4))
             } finally {
-                $arc.Dispose()
                 $outline.Dispose()
                 $fill.Dispose()
             }
         }
         if ($Trail -and $age -lt 2.2) {
-            $origin = Get-SignalFootprint $band $Trail.From
-            $ghost = New-SignalArc (Get-SpectrumX $axis $origin.Left) (Get-SpectrumX $axis $origin.Right) $floor (
-                $space * [Math]::Max(0.06, $Trail.Signal / 100.0)
-            )
+            $origin = $Trail.Origin
             $fade = [int] (180 * (1.0 - $age / 2.2))
             $ghostPen = [Drawing.Pen]::new([Drawing.Color]::FromArgb($fade, $Theme.Trail), [single] 1.4)
             $ghostText = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb($fade, $Theme.Trail))
             $ghostPen.DashStyle = 'Dash'
             try {
-                $Graphics.DrawPath($ghostPen, $ghost)
+                $rise = $space * [Math]::Max(0.06, $Trail.Signal / 100.0)
+                foreach ($segment in (Get-SignalSegments $origin)) {
+                    $ghost = New-SignalArc (Get-SpectrumX $axis $segment.Left) (Get-SpectrumX $axis $segment.Right) $floor $rise
+                    try { $Graphics.DrawPath($ghostPen, $ghost) }
+                    finally { $ghost.Dispose() }
+                }
                 $startX = Get-SpectrumX $axis $origin.Primary
                 $Graphics.DrawLine($ghostPen, $startX, [single] 12, $startX, $floor)
                 $Graphics.DrawString("$($Trail.From) → $($Trail.To)", $Panel.Font, $ghostText, [single] 16, [single] 1)
             } finally {
-                $ghost.Dispose()
                 $ghostPen.Dispose()
                 $ghostText.Dispose()
             }
@@ -176,7 +163,7 @@ function Draw-Spectrum($Panel, $Graphics, [object[]] $Points, $Plan, $Trail, [do
             $lastX = $x
         }
     } finally {
-        if ($ownShape) { $ownShape.Dispose() }
+        foreach ($ownShape in $ownShapes) { $ownShape.Dispose() }
         $grid.Dispose()
         $text.Dispose()
     }

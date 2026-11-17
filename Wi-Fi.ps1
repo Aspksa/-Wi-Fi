@@ -35,6 +35,9 @@ $script:worker = $null
 $script:scan = $null
 $script:refreshingRows = $false
 $script:lastScanAt = $null
+$script:lastActiveRadioScan = -90.0
+$script:activeRadioScan = $false
+$script:lanDuringScan = $false
 $script:linkState = ''
 $script:storageNote = ''
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -212,7 +215,7 @@ foreach ($band in @('2.4', '5')) {
     $card.BackColor = $surface
     [void] $card.RowStyles.Add([Windows.Forms.RowStyle]::new('Absolute', 28))
     [void] $card.RowStyles.Add([Windows.Forms.RowStyle]::new('Percent', 100))
-    $headline = New-Label "$($band.Replace('.', ',')) ГГц   ·   Полоса по оценке" $white
+    $headline = New-Label "$($band.Replace('.', ',')) ГГц   ·   Карта каналов" $white
     $headline.Margin = [Windows.Forms.Padding]::new(8, 0, 0, 0)
     $card.Controls.Add($headline, 0, 0)
     $panel = New-GraphPanel
@@ -232,8 +235,7 @@ foreach ($band in @('2.4', '5')) {
         $nearest = Get-SpectrumHover $axis $visible $eventArgs.X
         $caption = if ($nearest) {
             $ssid = if ($nearest.SSID) { $nearest.SSID } else { 'Скрытая сеть' }
-            $footprint = Get-SignalFootprint $nearest.Band $nearest.Channel
-            "$ssid · канал $($nearest.Channel) · сигнал $($nearest.Signal)% · оценка полосы $($footprint.Width) МГц"
+            Format-WifiPointTip $nearest $ssid
         } else { '' }
         if ($toolTip.GetToolTip($sender) -ne $caption) { $toolTip.SetToolTip($sender, $caption) }
     })
@@ -337,7 +339,7 @@ function Draw-Heatmap($Panel, $Graphics) {
     }
 }
 $scanScript = {
-    param([string] $DiagnosticsScript)
+    param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan)
     $ErrorActionPreference = 'Stop'
     . $DiagnosticsScript
 
@@ -367,6 +369,16 @@ $scanScript = {
         } finally {
             $process.Dispose()
         }
+    }
+
+    $radio = try {
+        if (-not ('WiFi.NativeScanner' -as [type])) { Add-Type -Path $NativeSource -ErrorAction Stop }
+        $wait = if ($ActiveScan) { 4000 } else { 0 }
+        [WiFi.NativeScanner]::Scan($wait)
+    } catch { $null }
+    if ($radio) {
+        $diagnostics = try { Get-WifiDiagnostics } catch { $null }
+        return [pscustomobject] @{ Native = $radio; Diagnostics = $diagnostics }
     }
 
     $networks = Invoke-Netsh 'wlan show networks mode=bssid'
@@ -457,7 +469,7 @@ function Get-SelectedPoint {
 function Show-Tracking {
     $selected = Get-SelectedPoint
     $tracked = $script:history.Tracked
-    $canStart = $selected -and -not $selected.Own -and
+    $canStart = $selected -and -not $selected.Own -and $selected.Fresh -ne $false -and
         (-not $tracked -or $selected.BSSID -ne $tracked.BSSID -or $selected.Band -ne $tracked.Band)
     $trackButton.Enabled = [bool] ($canStart -or $tracked)
     $trackButton.Text = if ($canStart -or -not $tracked) { 'Следить' } else { 'Остановить' }
@@ -474,10 +486,11 @@ function Show-Networks {
                     @{ Expression = 'Signal'; Descending = $true })) {
             $name = if ($point.SSID) { $point.SSID } else { 'Скрытая сеть' }
             $item = [Windows.Forms.ListViewItem]::new([string[]] @(
-                $name, $point.Band.Replace('.', ','), [string] $point.Channel, "$($point.Signal)%"
+                $name, $point.Band.Replace('.', ','), [string] $point.Channel, (Format-WifiSignal $point)
             ))
             $item.Tag = $point
-            if ($point.Own) { $item.ForeColor = $gold }
+            if ($point.Fresh -eq $false) { $item.ForeColor = $muted }
+            elseif ($point.Own) { $item.ForeColor = $gold }
             [void] $networkList.Items.Add($item)
             if ($selected -and $point.BSSID -eq $selected.BSSID -and $point.Band -eq $selected.Band) {
                 $item.Selected = $true
@@ -509,7 +522,7 @@ function Show-Diagnostics($Snapshot, [string] $State) {
     }
 }
 
-function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] $State) {
+function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] $State, $Native) {
     foreach ($band in @('2.4', '5')) {
         $past = Get-PastScores $script:history $At $band
         $plan = Get-ChannelPlan $script:points $band $Connected $past
@@ -522,15 +535,21 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
         $script:plans[$band] = $plan
         $bandText = $band.Replace('.', ',') + ' ГГц'
         $previous = $script:streak[$band]
+        $observation = Get-ScanObservationKey $Native $script:points $band $At
         $count = 0
         $key = "$($plan.Home.BSSID)|$($plan.Home.Channel)|$($plan.Best.Channel)"
-        if (-not $plan.Home) {
+        if ($Native -and -not $observation) {
+            $message = 'Ожидание свежего снимка эфира.'
+        } elseif (-not $plan.Home) {
             $message = 'Укажи SSID, чтобы определить свой канал.'
         } elseif ($State -eq 'external') {
             $message = "Канал $($plan.Home.Channel). Проблема видна только до внешнего адреса."
         } elseif ($plan.Improves) {
             $count = 1
-            if ($previous -and $previous.Key -eq $key) { $count += $previous.Samples }
+            if ($previous -and $previous.Key -eq $key) {
+                $count = $previous.Samples
+                if ($previous.Observation -ne $observation) { $count++ }
+            }
             if ($count -ge 3) {
                 $current = $plan.Rows | Where-Object Current | Select-Object -First 1
                 $message = if ($plan.TrialSupport) {
@@ -538,7 +557,7 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
                 } else {
                     "Канал $($plan.Home.Channel) → $($plan.Best.Channel): $($current.Score) → $($plan.Best.Score) баллов."
                 }
-                if ($count -eq 3) { Add-MonitorEvent $script:history $At "$bandText · совет: $message" }
+                if ($count -eq 3 -and $previous.Samples -lt 3) { Add-MonitorEvent $script:history $At "$bandText · совет: $message" }
             } else {
                 $message = "Кандидат $($plan.Best.Channel) · подтверждение $count из 3."
             }
@@ -549,7 +568,7 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
         } else {
             $message = "Канал $($plan.Home.Channel). Выигрыш от смены пока не виден."
         }
-        $script:streak[$band] = @{ Key = $key; Samples = $count }
+        $script:streak[$band] = @{ Key = $key; Samples = $count; Observation = $observation }
         $adviceLabels[$band].Text = "$bandText · $message"
         $mapPanels[$band].Invalidate()
     }
@@ -598,7 +617,8 @@ function Set-WifiTelemetryRoute($Snapshot) {
 
 function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost) {
     $radio = $script:engine.Radio
-    if ($radio -and $At - $radio.At -gt 45000) { $radio = $null }
+    if ($radio -and ($At - $radio.At -gt 45000 -or
+            ($radio.ObservedAt -and $At - $radio.ObservedAt -gt 45000))) { $radio = $null }
     $upload = $null
     if ($script:adapter) {
         try {
@@ -645,7 +665,7 @@ $probeTimer.Add_Tick({
         $task = $script:wanTask
         $script:wanTask = $null
         if ($task.Status -eq 'Faulted') { [void] $task.Exception }
-        if ($task.Status -eq 'RanToCompletion' -and $script:wanEnabled -and $script:wanEpoch -eq $script:networkEpoch) {
+        if ($task.Status -eq 'RanToCompletion' -and $script:wanEnabled -and -not $script:activeRadioScan -and $script:wanEpoch -eq $script:networkEpoch) {
             $reply = $task.Result
             $lost = $reply.Status -ne 'Success'
             $script:wanResult = @{
@@ -653,7 +673,7 @@ $probeTimer.Add_Tick({
             }
         }
     }
-    if ($script:wanEnabled -and -not $script:wanTask -and $now -ge $script:nextWan) {
+    if ($script:wanEnabled -and -not $script:activeRadioScan -and -not $script:wanTask -and $now -ge $script:nextWan) {
         $script:wanEpoch = $script:networkEpoch
         $script:nextWan = $now + 3.0
         try {
@@ -673,7 +693,9 @@ $probeTimer.Add_Tick({
             $lost = $reply.Status -ne 'Success'
             $milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
             $level = Get-LatencyLevel $milliseconds $lost
-            Add-LatencyMeasurement $at $milliseconds $lost
+            if (-not $script:activeRadioScan -and -not $script:lanDuringScan) {
+                Add-LatencyMeasurement $at $milliseconds $lost
+            }
             $script:latencySamples = @($script:latencySamples | Where-Object { $now - $_.At -le 60 }) +
                 @([pscustomobject] @{ At = $now; Milliseconds = $milliseconds; Level = $level })
             if ($level -ne 'normal') {
@@ -687,6 +709,7 @@ $probeTimer.Add_Tick({
         $interval = if ($at -lt $script:engine.BurstUntil) { 0.35 } else { 1.0 }
         $script:nextProbe = $now + $interval
         $script:lanEpoch = $script:networkEpoch
+        $script:lanDuringScan = $script:activeRadioScan
         try {
             $script:pingTask = $ping.SendPingAsync($script:gateway, 650)
         } catch [Net.NetworkInformation.PingException] {
@@ -710,12 +733,22 @@ $animation.Add_Tick({
     if (-not $pulse -and -not $script:trail) { $animation.Stop() }
 })
 
-function Start-Scan {
+function Start-Scan([bool] $Force = $false) {
     if ($script:worker) { return }
+    $now = $clock.Elapsed.TotalSeconds
+    $active = $Force -or ($now - $script:lastActiveRadioScan -ge 90 -and -not $script:engine.Incident)
+    $script:activeRadioScan = $active
+    if ($active) {
+        $script:lastActiveRadioScan = $now
+        $script:wanResult = $null
+    }
     $refresh.Enabled = $false
     $status.Text = 'Обновление Wi-Fi и диагностики…'
     $script:worker = [PowerShell]::Create()
-    [void] $script:worker.AddScript($scanScript.ToString()).AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
+    [void] $script:worker.AddScript($scanScript.ToString())
+    [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
+    [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
+    [void] $script:worker.AddArgument($active)
     $script:scan = $script:worker.BeginInvoke()
     $poll.Start()
 }
@@ -727,16 +760,24 @@ $poll.Add_Tick({
         $result = $script:worker.EndInvoke($script:scan) | Select-Object -Last 1
         if ($script:worker.HadErrors) { throw $script:worker.Streams.Error[0] }
         if (-not $result) { throw 'Windows не вернула результат сканирования.' }
-        $connectedAddresses = @(Get-ConnectedAddresses $result.Interfaces)
-        $script:points = @(Get-WifiPoints $result.Networks $connectedAddresses $homeInput.Text)
+        $previousPoints = $script:points
+        if ($result.Native) {
+            $connectedAddresses = @($result.Native.Connected | Where-Object { $_ })
+            $script:points = @(ConvertFrom-NativeScan $result.Native $homeInput.Text)
+            $source = 'Windows WLAN'
+        } else {
+            $connectedAddresses = @(Get-ConnectedAddresses $result.Interfaces)
+            $script:points = @(Get-WifiPoints $result.Networks $connectedAddresses $homeInput.Text)
+            $source = 'netsh'
+        }
         $at = Get-Date
-        $trail = New-ChannelTrail $script:history.Tracked $script:points $clock.Elapsed.TotalSeconds
+        $trail = New-ChannelTrail $script:history.Tracked $script:points $clock.Elapsed.TotalSeconds $previousPoints
         if ($trail) {
             $script:trail = $trail
             $animation.Start()
         }
         Set-WifiTelemetryRoute $result.Diagnostics
-        $tickAt = Get-UnixMilliseconds
+        $tickAt = if ($result.Native) { $result.Native.FinishedAt } else { Get-UnixMilliseconds }
         $radio = Get-WifiRadioContext $script:points $connectedAddresses $script:engine.Radio $tickAt
         Update-WifiRadio $script:engine $radio $tickAt
         if ($script:database -and $script:engine.PendingScans.Count -lt 120) {
@@ -754,7 +795,7 @@ $poll.Add_Tick({
             $script:linkState = $state
         }
         Show-Diagnostics $result.Diagnostics $state
-        Update-Recommendations $at $connectedAddresses $state
+        Update-Recommendations $at $connectedAddresses $state $result.Native
         Update-TrackedPoint $script:history $script:points $script:plans $at
         Update-HeatHistory $script:history $script:plans $at
         Write-History
@@ -762,7 +803,7 @@ $poll.Add_Tick({
         Show-Events
         $heatPanel.Invalidate()
         $script:lastScanAt = $at
-        $status.Text = "Замер $($at.ToString('HH:mm:ss'))  ·  Точек: $($script:points.Count)  ·  Золотой контур — свой канал. $script:storageNote"
+        $status.Text = "Замер $($at.ToString('HH:mm:ss'))  ·  $source  ·  Точек: $($script:points.Count)  ·  Золотой контур — свой канал. $script:storageNote"
     } catch {
         $script:streak.Clear()
         Set-WifiTelemetryRoute $null
@@ -774,6 +815,7 @@ $poll.Add_Tick({
         $script:worker.Dispose()
         $script:worker = $null
         $script:scan = $null
+        $script:activeRadioScan = $false
         $refresh.Enabled = $true
     }
 })
@@ -785,7 +827,7 @@ $trackButton.Add_Click({
     $selected = Get-SelectedPoint
     $tracked = $script:history.Tracked
     $at = Get-Date
-    if ($selected -and -not $selected.Own -and
+    if ($selected -and -not $selected.Own -and $selected.Fresh -ne $false -and
             (-not $tracked -or $selected.BSSID -ne $tracked.BSSID -or $selected.Band -ne $tracked.Band)) {
         $name = if ($selected.SSID) { $selected.SSID } else { 'Скрытая сеть' }
         $script:history.Tracked = [pscustomobject] @{
@@ -805,16 +847,16 @@ $trackButton.Add_Click({
     Show-Tracking
     Show-Events
 })
-$refresh.Add_Click({ Start-Scan })
+$refresh.Add_Click({ Start-Scan $true })
 $homeInput.Add_KeyDown({
     param($sender, $eventArgs)
     if ($eventArgs.KeyCode -eq 'Enter') {
         $eventArgs.SuppressKeyPress = $true
-        Start-Scan
+        Start-Scan $true
     }
 })
 $autoRefresh.Add_Tick({ Start-Scan })
-$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan; $autoRefresh.Start(); $probeTimer.Start(); $storageTimer.Start() })
+$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan $true; $autoRefresh.Start(); $probeTimer.Start(); $storageTimer.Start() })
 try {
     [void] $form.ShowDialog()
 } finally {

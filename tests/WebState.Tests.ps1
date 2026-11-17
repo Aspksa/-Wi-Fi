@@ -34,6 +34,28 @@ Assert (($run.History.Tracked.BSSID -eq $neighbor.BSSID) -and $run.History.Event
 Set-WebTrackedPoint $run '' $now
 Assert ($null -eq $run.History.Tracked -and $run.History.Events.Count -eq 2) 'Stopping tracking is recorded'
 
+$ownPoint | Add-Member -NotePropertyName ObservedAt -NotePropertyValue 100000L
+$neighbor.Fresh = $false
+$frame = Get-SpectrumFrame 100000L @($ownPoint, $neighbor)
+Assert ($frame.points.Count -eq 1 -and $frame.points[0].own) 'Stale observations are excluded from spectrum history'
+$duplicates = @(Update-SpectrumFrames @($frame) (Get-SpectrumFrame 130000L @($ownPoint)))
+Assert ($duplicates.Count -eq 1 -and $duplicates[0].at -eq 100000L) 'Repeated native snapshots do not create history rows'
+$spectrum = @($frame)
+for ($i = 1; $i -le 20; $i++) {
+    $ownPoint.ObservedAt += 30000
+    $spectrum = @(Update-SpectrumFrames $spectrum (Get-SpectrumFrame $ownPoint.ObservedAt @($ownPoint)))
+}
+Assert ($spectrum.Count -eq 16 -and $spectrum[-1].at -eq $ownPoint.ObservedAt) 'History keeps only the latest sixteen distinct records'
+
+$archive = [pscustomobject] @{ Rows = @(
+    ,@(200000L, 'invalid json')
+    ,@(175000L, (ConvertTo-Json -InputObject @($ownPoint) -Depth 4 -Compress))
+    ,@(145000L, (ConvertTo-Json -InputObject @($ownPoint) -Depth 4 -Compress))
+) }
+$archive | Add-Member -MemberType ScriptMethod -Name Query -Value { param($sql, $arguments) return ,$this.Rows }
+$restored = @(Read-WebSpectrum $archive 200000L)
+Assert ($restored.Count -eq 1 -and $restored[0].at -eq 145000L -and $restored[0].points[0].id -eq (Get-WebPointId $ownPoint)) 'Archived JSON restores chronologically and skips malformed or duplicate records'
+
 $server = [WiFi.WebServer]::new((Join-Path $project 'web'))
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.UseProxy = $false
@@ -41,6 +63,9 @@ $client = [System.Net.Http.HttpClient]::new($handler)
 $client.Timeout = [TimeSpan]::FromSeconds(4)
 try {
     $server.SetState(($state | ConvertTo-Json -Depth 8 -Compress))
+    $server.SetSpectrum((ConvertTo-Json -InputObject $spectrum -Depth 8 -Compress))
+    $items = @($client.GetStringAsync($server.Address + '/api/spectrum').GetAwaiter().GetResult() | ConvertFrom-Json)
+    Assert ($items.Count -eq 16 -and $items[-1].points[0].segments.Count -eq 1) 'Archived footprint data is served as JSON'
     Assert ($server.Address.StartsWith('http://127.0.0.1:')) 'The server binds to IPv4 loopback'
     $page = $client.GetStringAsync($server.Address).GetAwaiter().GetResult()
     Assert ($page.Contains('spectrum-24') -and $page.Contains('spectrum-5')) 'The dashboard page is served'
@@ -71,4 +96,4 @@ try {
     $client.Dispose()
     $server.Dispose()
 }
-'Passed 16 web dashboard and local HTTP checks'
+'Passed 21 web dashboard, history and local HTTP checks'

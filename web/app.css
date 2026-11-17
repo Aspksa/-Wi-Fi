@@ -52,8 +52,8 @@ h1 { font-size: clamp(37px, 5vw, 69px); line-height: .98; letter-spacing: -.07em
 .input-group button:hover, .quiet:hover { background: #4c3c24; }
 .notice { margin-bottom: 14px; border: 1px solid #664526; color: #f5bf84; background: #302417; border-radius: 9px; padding: 10px 14px; font-size: 13px; }
 .main-grid, .bottom-grid { display: grid; gap: 14px; align-items: stretch; }
-.main-grid { grid-template-columns: minmax(0, 1.82fr) minmax(295px, 1fr); }
-.sidebar { display: grid; gap: 14px; grid-template-rows: 1fr auto; min-width: 0; }
+.main-grid { grid-template-columns: minmax(0, 1fr); }
+.sidebar { display: grid; gap: 14px; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); min-width: 0; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; min-width: 0; overflow: hidden; }
 .panel-heading { min-height: 52px; display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 11px 17px; }
 h2 { font-size: 16px; font-weight: 630; letter-spacing: -.018em; }
@@ -63,7 +63,25 @@ h2 { font-size: 16px; font-weight: 630; letter-spacing: -.018em; }
 .own { background: var(--gold); }
 .neighbor { background: var(--blue); }
 .overlap { background: var(--orange); }
-.spectrum-band { position: relative; padding: 11px 17px 2px; border-top: 1px solid var(--line); }
+.spectrum { background: radial-gradient(ellipse at 8% 2%, #24241b 0, #171a17 46%, #151915 100%); }
+.spectrum-heading h2 { font-size: 18px; }
+.spectrum-bands { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.spectrum-band { position: relative; padding: 14px 17px 9px; border-top: 1px solid var(--line); min-width: 0; }
+.spectrum-band + .spectrum-band { border-left: 1px solid var(--line); }
+.spectrum-plot { height: 190px; border-radius: 4px; cursor: crosshair; }
+.spectrum-plot:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.waterfall { position: relative; margin-top: 2px; border-top: 1px solid #33352a; }
+.waterfall > span { display: block; margin: 7px 14px 2px; font: 10px var(--mono); color: var(--muted); }
+.waterfall canvas { height: 80px; }
+.spectrum-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px 20px; min-height: 51px; padding: 8px 17px; border-top: 1px solid var(--line); }
+.point-focus { min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.point-focus p { overflow-wrap: anywhere; }
+.point-focus button { white-space: nowrap; }
+.playback { display: flex; align-items: center; gap: 9px; font: 11px var(--mono); color: var(--muted); }
+.playback label, .playback output { white-space: nowrap; }
+.playback input { width: clamp(65px, 10vw, 180px); accent-color: var(--gold); }
+.playback output { color: var(--gold); }
+.playback button { white-space: nowrap; }
 .band-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .band-heading h3 { font-family: var(--mono); font-size: 17px; color: var(--text); }
 .band-heading small, .band-heading p { color: var(--muted); font-size: 11px; font-weight: normal; }
@@ -114,8 +132,8 @@ tr.stale { color: var(--dim); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 @media (max-width: 860px) {
   .shell { padding: 0 20px 24px; }
-  .main-grid { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { grid-template-columns: 1fr 1fr; grid-template-rows: auto; }
+  .spectrum-toolbar { flex-wrap: wrap; }
+  .spectrum-plot { height: 160px; }
 }
 @media (max-width: 570px) {
   .shell { padding: 0 12px 20px; }
@@ -128,7 +146,12 @@ tr.stale { color: var(--dim); }
   .home-form { width: 100%; }
   .input-group input { flex: 1; }
   .panel-heading { padding: 10px 12px; flex-wrap: wrap; gap: 7px; }
-  .spectrum-band { padding: 8px 12px 2px; }
+  .spectrum-bands { grid-template-columns: minmax(0, 1fr); }
+  .spectrum-band + .spectrum-band { border-left: 0; }
+  .spectrum-band { padding: 8px 12px 5px; }
+  .waterfall canvas { height: 68px; }
+  .spectrum-toolbar { align-items: start; padding: 9px 12px; }
+  .playback { flex-wrap: wrap; }
   .sidebar, .bottom-grid { grid-template-columns: minmax(0, 1fr); }
   .heat-grid { padding: 0 10px 10px; }
   .heat-row { grid-template-columns: 42px repeat(24, minmax(0, 1fr)); gap: 2px; }

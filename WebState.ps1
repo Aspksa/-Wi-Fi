@@ -83,3 +83,43 @@ function Set-WebTrackedPoint($Session, [string] $Value, [datetime] $At) {
     Add-MonitorEvent $Session.History $At "Наблюдение · $name, канал $($point.Channel)."
     Update-TrackedPoint $Session.History $Session.Points $Session.Plans $At
 }
+
+function Get-SpectrumFrame([long] $At, [object[]] $Points) {
+    $fresh = @($Points | Where-Object { $_.Fresh -ne $false })
+    if (-not $fresh.Count) { return }
+    $timestamps = @(foreach ($band in @('2.4', '5')) {
+        $recent = $fresh | Where-Object { $_.Band -eq $band -and $_.ObservedAt } |
+            Sort-Object ObservedAt -Descending | Select-Object -First 1
+        if ($recent) { "$band/$($recent.ObservedAt)" }
+    })
+    [pscustomobject] @{
+        at = $At
+        key = if ($timestamps.Count) { $timestamps -join '|' } else { "scan/$At" }
+        points = @(foreach ($point in $fresh) { ConvertTo-WebPoint $point $null })
+    }
+}
+
+function Update-SpectrumFrames([object[]] $Frames, $Frame) {
+    if (-not $Frame -or ($Frames.Count -and $Frames[-1].key -eq $Frame.key)) { return $Frames }
+    @($Frames + $Frame | Select-Object -Last 16)
+}
+
+function Read-WebSpectrum($Database, [long] $Now) {
+    $rows = $Database.Query(@'
+SELECT at_ms, observed_points FROM radio_scans
+WHERE at_ms >= ? AND at_ms <= ?
+ORDER BY at_ms DESC LIMIT 80
+'@, @(($Now - 3600000L), $Now))
+    $frames = @()
+    for ($index = $rows.Count - 1; $index -ge 0; $index--) {
+        $row = $rows[$index]
+        try {
+            $points = @($row[1] | ConvertFrom-Json)
+            $frames = @(Update-SpectrumFrames $frames (Get-SpectrumFrame $row[0] $points))
+        } catch {
+            # A malformed saved snapshot must not stop the live map.
+            continue
+        }
+    }
+    $frames
+}

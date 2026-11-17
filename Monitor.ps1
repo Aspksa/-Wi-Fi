@@ -104,32 +104,41 @@ function Update-HeatHistory($History, $Plans, [datetime] $At) {
     }
 }
 
-function Get-WifiDiagnostics {
-    $target = [Net.IPAddress]::Parse('1.1.1.1')
+function Get-InternetRouteAddress($Target) {
     $socket = [Net.Sockets.Socket]::new([Net.Sockets.AddressFamily]::InterNetwork,
         [Net.Sockets.SocketType]::Dgram, [Net.Sockets.ProtocolType]::Udp)
     try {
         # Connecting this UDP socket queries the route without sending any payload.
-        $socket.Connect($target, 443)
-        $routeAddress = $socket.LocalEndPoint.Address
+        $socket.Connect($Target, 443)
+        $socket.LocalEndPoint.Address
     } catch {
-        $routeAddress = $null
+        return
     } finally {
         $socket.Dispose()
     }
+}
+
+function Get-WifiDiagnostics {
+    $target = [Net.IPAddress]::Parse('1.1.1.1')
+    $routeAddress = Get-InternetRouteAddress $target
 
     $wifiInterfaces = [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
         Where-Object { $_.NetworkInterfaceType -eq 'Wireless80211' -and $_.OperationalStatus -eq 'Up' }
     $gateway = $null
     $wifiRoute = $false
+    $adapterId = $null
     foreach ($adapter in $wifiInterfaces) {
         $properties = $adapter.GetIPProperties()
         $candidate = $properties.GatewayAddresses | ForEach-Object { $_.Address } |
             Where-Object { $_.AddressFamily -eq 'InterNetwork' -and $_.ToString() -ne '0.0.0.0' } | Select-Object -First 1
-        if (-not $gateway -and $candidate) { $gateway = $candidate }
+        if (-not $gateway -and $candidate) {
+            $gateway = $candidate
+            $adapterId = $adapter.Id
+        }
         if ($routeAddress -and ($properties.UnicastAddresses | Where-Object { $_.Address.Equals($routeAddress) })) {
             $wifiRoute = $true
             $gateway = $candidate
+            $adapterId = $adapter.Id
             break
         }
     }
@@ -158,7 +167,7 @@ function Get-WifiDiagnostics {
         } else { $null }
         $pairs += [pscustomobject] @{ Tested = $tested; Lost = 3 - $samples.Count; Average = $average }
     }
-    [pscustomobject] @{ Router = $pairs[0]; Internet = $pairs[1]; Gateway = $gateway; WifiRoute = $wifiRoute }
+    [pscustomobject] @{ Router = $pairs[0]; Internet = $pairs[1]; Gateway = $gateway; WifiRoute = $wifiRoute; AdapterId = $adapterId }
 }
 
 function Get-LinkState($Diagnostics) {

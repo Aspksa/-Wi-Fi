@@ -2,6 +2,8 @@
 . (Join-Path $PSScriptRoot 'Scan.ps1')
 . (Join-Path $PSScriptRoot 'Monitor.ps1')
 . (Join-Path $PSScriptRoot 'Visuals.ps1')
+. (Join-Path $PSScriptRoot 'Intelligence.ps1')
+. (Join-Path $PSScriptRoot 'Database.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -25,7 +27,6 @@ $script:trail = $null
 $script:pulseUntil = 0.0
 $script:latencySamples = @()
 $script:gateway = $null
-$script:pingTarget = $null
 $script:pingTask = $null
 $script:nextProbe = 0.0
 $script:streak = @{}
@@ -50,12 +51,27 @@ if (-not $ownsMutex) {
 }
 $localData = [Environment]::GetFolderPath('LocalApplicationData')
 $historyFile = Join-Path $localData 'Wi Fi\history.json'
-$script:history = try {
-    Read-MonitorHistory $historyFile
+$databaseFile = Join-Path $localData 'Wi Fi\wifi.sqlite'
+$script:database = $null
+$script:engine = New-WifiIntelligence
+$script:forecast = $null
+$script:nextPruneAt = (Get-UnixMilliseconds) + 3600000
+try {
+    $script:database = Open-WifiDatabase $databaseFile
+    Remove-ExpiredMeasurements $script:database (Get-UnixMilliseconds)
 } catch {
-    $script:storageNote = 'История недоступна. Новые записи остаются в памяти.'
+    if ($script:database) { $script:database.Dispose(); $script:database = $null }
+    $script:storageNote = 'SQLite недоступна. Новые измерения остаются в памяти.'
+}
+$script:history = try {
+    if ($script:database) { Get-DatabaseHistory $script:database $historyFile }
+    else { Read-MonitorHistory $historyFile }
+} catch {
     New-MonitorHistory
 }
+$script:savedHomeName = if ($script:database) {
+    try { Get-DatabaseSetting $script:database 'home_ssid' } catch { '' }
+} else { '' }
 
 function New-Grid([int] $Columns, [int] $Rows) {
     $grid = New-Object Windows.Forms.TableLayoutPanel
@@ -135,6 +151,7 @@ $homeLabel.Size = [Drawing.Size]::new(75, 32)
 $homeInput = New-Object Windows.Forms.TextBox
 $homeInput.Width = 178
 $homeInput.MaxLength = 64
+$homeInput.Text = [string] $script:savedHomeName
 $homeInput.BackColor = $surface
 $homeInput.ForeColor = $white
 $homeInput.Margin = [Windows.Forms.Padding]::new(0, 6, 10, 0)
@@ -371,9 +388,55 @@ $scanScript = {
 }
 
 function Write-History {
-    if ($script:storageNote) { return }
-    try { Save-MonitorHistory $script:history $historyFile }
-    catch { $script:storageNote = 'История недоступна. Новые записи остаются в памяти.' }
+    if (-not $script:database) { return }
+    try {
+        Set-DatabaseSetting $script:database 'history' (ConvertTo-Json -InputObject $script:history -Depth 8 -Compress)
+        if ($homeInput.Text -cne $script:savedHomeName) {
+            Set-DatabaseSetting $script:database 'home_ssid' $homeInput.Text
+            $script:savedHomeName = $homeInput.Text
+        }
+    } catch {
+        $script:storageNote = 'Сохранение истории SQLite не удалось.'
+    }
+}
+
+function Write-Measurements {
+    if (-not $script:database) {
+        $script:engine.PendingSamples.Clear()
+        $script:engine.PendingScans.Clear()
+        $script:engine.PendingIncidents.Clear()
+        $script:engine.PendingTrials.Clear()
+        $script:engine.PendingChecks.Clear()
+        return
+    }
+    if (-not ($script:engine.PendingSamples.Count -or $script:engine.PendingScans.Count -or
+            $script:engine.PendingIncidents.Count -or $script:engine.PendingTrials.Count -or
+            $script:engine.PendingChecks.Count)) { return }
+    try {
+        Save-Intelligence $script:database $script:engine
+        $now = Get-UnixMilliseconds
+        if ($now -ge $script:nextPruneAt) {
+            Remove-ExpiredMeasurements $script:database $now
+            $script:nextPruneAt = $now + 3600000
+        }
+        $script:storageNote = ''
+    } catch {
+        $script:storageNote = 'SQLite временно недоступна. Повторю запись.'
+    }
+}
+
+function Publish-Intelligence([object[]] $Entries) {
+    foreach ($entry in $Entries) {
+        Add-MonitorEvent $script:history (Get-Date) $entry.Message
+        if ($entry.Forecast) {
+            $radio = $script:engine.Radio
+            $script:forecast = @{ At = (Get-UnixMilliseconds); Band = $radio.Band; Network = $radio.Network; Text = $entry.Message }
+            if ($radio -and $adviceLabels[$radio.Band]) {
+                $adviceLabels[$radio.Band].Text = $entry.Message
+            }
+        }
+    }
+    if ($Entries.Count) { Show-Events; Write-History; Write-Measurements }
 }
 
 function Show-Events {
@@ -450,6 +513,12 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
     foreach ($band in @('2.4', '5')) {
         $past = Get-PastScores $script:history $At $band
         $plan = Get-ChannelPlan $script:points $band $Connected $past
+        if ($script:database -and $plan.Home) {
+            try {
+                $memory = Get-TrialMemory $script:database (Get-WifiNetworkKey $plan.Home) $plan.Home.Channel
+                if ($memory.Count) { $plan = Get-ChannelPlan $script:points $band $Connected $past $memory }
+            } catch { $script:storageNote = 'Не удалось прочитать результаты прошлых смен канала.' }
+        }
         $script:plans[$band] = $plan
         $bandText = $band.Replace('.', ',') + ' ГГц'
         $previous = $script:streak[$band]
@@ -464,11 +533,19 @@ function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] 
             if ($previous -and $previous.Key -eq $key) { $count += $previous.Samples }
             if ($count -ge 3) {
                 $current = $plan.Rows | Where-Object Current | Select-Object -First 1
-                $message = "Канал $($plan.Home.Channel) → $($plan.Best.Channel): $($current.Score) → $($plan.Best.Score) баллов."
+                $message = if ($plan.TrialSupport) {
+                    "Канал $($plan.Best.Channel) уменьшал скачки в $($plan.TrialSupport.Wins) прошлых сравнениях."
+                } else {
+                    "Канал $($plan.Home.Channel) → $($plan.Best.Channel): $($current.Score) → $($plan.Best.Score) баллов."
+                }
                 if ($count -eq 3) { Add-MonitorEvent $script:history $At "$bandText · совет: $message" }
             } else {
                 $message = "Кандидат $($plan.Best.Channel) · подтверждение $count из 3."
             }
+        } elseif ($script:forecast -and $script:forecast.Band -eq $band -and
+                $script:forecast.Network -eq (Get-WifiNetworkKey $plan.Home) -and
+                (Get-UnixMilliseconds) - $script:forecast.At -lt 60000) {
+            $message = $script:forecast.Text
         } else {
             $message = "Канал $($plan.Home.Channel). Выигрыш от смены пока не виден."
         }
@@ -487,6 +564,70 @@ $animation.Interval = 33
 $probeTimer = New-Object Windows.Forms.Timer
 $probeTimer.Interval = 100
 $ping = [Net.NetworkInformation.Ping]::new()
+$wanPing = [Net.NetworkInformation.Ping]::new()
+$wanTarget = [Net.IPAddress]::Parse('1.1.1.1')
+$script:wanTask = $null
+$script:wanResult = $null
+$script:wanEnabled = $false
+$script:networkEpoch = 0
+$script:lanEpoch = 0
+$script:wanEpoch = 0
+$script:nextWan = 0.0
+$script:adapter = $null
+$script:trafficPoint = $null
+$storageTimer = New-Object Windows.Forms.Timer
+$storageTimer.Interval = 10000
+$storageTimer.Add_Tick({ Write-Measurements })
+
+function Set-WifiTelemetryRoute($Snapshot) {
+    $adapterId = $Snapshot.AdapterId
+    $wanEnabled = [bool] ($Snapshot.WifiRoute -and $Snapshot.Gateway)
+    if ([string] $script:gateway -ne [string] $Snapshot.Gateway -or
+            [string] $script:adapter.Id -ne [string] $adapterId -or $script:wanEnabled -ne $wanEnabled) {
+        $script:networkEpoch++
+        $script:wanResult = $null
+        $script:trafficPoint = $null
+        $script:wanEnabled = $wanEnabled
+        $script:adapter = if ($adapterId) {
+            [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+                Where-Object Id -eq $adapterId | Select-Object -First 1
+        }
+    }
+    Set-ProbeGateway $Snapshot.Gateway
+}
+
+function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost) {
+    $radio = $script:engine.Radio
+    if ($radio -and $At - $radio.At -gt 45000) { $radio = $null }
+    $upload = $null
+    if ($script:adapter) {
+        try {
+            $bytes = $script:adapter.GetIPv4Statistics().BytesSent
+            $upload = Get-UploadRate $script:trafficPoint $bytes $At
+            $script:trafficPoint = @{ At = $At; Bytes = $bytes }
+        } catch { $script:trafficPoint = $null }
+    }
+    $external = $script:wanResult
+    $script:wanResult = $null
+    if ($external -and $At - $external.At -gt 1400) { $external = $null }
+    $overlap = if ($radio) {
+        if ($radio.ChangedAt -gt 0 -and $At - $radio.ChangedAt -lt 45000) { 'changed' }
+        elseif ($radio.Signature) { 'strong' }
+        else { 'clear' }
+    }
+    $measurement = [pscustomobject] @{
+        At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Signal = $radio.Signal
+        Upload = $upload; Overlap = $overlap; Lan = $Milliseconds; LanLoss = $Lost
+        Wan = $external.Milliseconds; WanLoss = $external.Lost
+    }
+    $entries = @(Add-WifiSample $script:engine $measurement {
+        param($network, $context)
+        if ($script:database) {
+            try { Get-ForecastEvidence $script:database $network $context } catch { return }
+        }
+    })
+    if ($entries.Count) { Publish-Intelligence $entries }
+}
 
 function Set-ProbeGateway($Address) {
     if ([string] $Address -eq [string] $script:gateway) { return }
@@ -499,15 +640,40 @@ function Set-ProbeGateway($Address) {
 
 $probeTimer.Add_Tick({
     $now = $clock.Elapsed.TotalSeconds
+    $at = Get-UnixMilliseconds
+    if ($script:wanTask -and $script:wanTask.IsCompleted) {
+        $task = $script:wanTask
+        $script:wanTask = $null
+        if ($task.Status -eq 'Faulted') { [void] $task.Exception }
+        if ($task.Status -eq 'RanToCompletion' -and $script:wanEnabled -and $script:wanEpoch -eq $script:networkEpoch) {
+            $reply = $task.Result
+            $lost = $reply.Status -ne 'Success'
+            $script:wanResult = @{
+                At = $at; Lost = $lost; Milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
+            }
+        }
+    }
+    if ($script:wanEnabled -and -not $script:wanTask -and $now -ge $script:nextWan) {
+        $script:wanEpoch = $script:networkEpoch
+        $script:nextWan = $now + 3.0
+        try {
+            $route = Get-InternetRouteAddress $wanTarget
+            if ($route -and $script:adapter -and ($script:adapter.GetIPProperties().UnicastAddresses |
+                        Where-Object { $_.Address.Equals($route) } | Select-Object -First 1)) {
+                $script:wanTask = $wanPing.SendPingAsync($wanTarget, 650)
+            }
+        } catch { $script:wanTask = $null }
+    }
     if ($script:pingTask -and $script:pingTask.IsCompleted) {
         $task = $script:pingTask
         $script:pingTask = $null
         if ($task.Status -eq 'Faulted') { [void] $task.Exception }
-        if ($task.Status -eq 'RanToCompletion' -and [string] $script:pingTarget -eq [string] $script:gateway) {
+        if ($task.Status -eq 'RanToCompletion' -and $script:lanEpoch -eq $script:networkEpoch) {
             $reply = $task.Result
             $lost = $reply.Status -ne 'Success'
             $milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
             $level = Get-LatencyLevel $milliseconds $lost
+            Add-LatencyMeasurement $at $milliseconds $lost
             $script:latencySamples = @($script:latencySamples | Where-Object { $now - $_.At -le 60 }) +
                 @([pscustomobject] @{ At = $now; Milliseconds = $milliseconds; Level = $level })
             if ($level -ne 'normal') {
@@ -518,10 +684,11 @@ $probeTimer.Add_Tick({
         }
     }
     if ($script:gateway -and -not $script:pingTask -and $now -ge $script:nextProbe) {
-        $script:nextProbe = $now + 1.0
-        $script:pingTarget = $script:gateway
+        $interval = if ($at -lt $script:engine.BurstUntil) { 0.35 } else { 1.0 }
+        $script:nextProbe = $now + $interval
+        $script:lanEpoch = $script:networkEpoch
         try {
-            $script:pingTask = $ping.SendPingAsync($script:pingTarget, 650)
+            $script:pingTask = $ping.SendPingAsync($script:gateway, 650)
         } catch [Net.NetworkInformation.PingException] {
             $script:pingTask = $null
         }
@@ -568,7 +735,15 @@ $poll.Add_Tick({
             $script:trail = $trail
             $animation.Start()
         }
-        Set-ProbeGateway $result.Diagnostics.Gateway
+        Set-WifiTelemetryRoute $result.Diagnostics
+        $tickAt = Get-UnixMilliseconds
+        $radio = Get-WifiRadioContext $script:points $connectedAddresses $script:engine.Radio $tickAt
+        Update-WifiRadio $script:engine $radio $tickAt
+        if ($script:database -and $script:engine.PendingScans.Count -lt 120) {
+            $script:engine.PendingScans.Add([pscustomobject] @{
+                At = $tickAt; Network = [string] $radio.Network; Points = $script:points
+            })
+        }
         $state = Get-LinkState $result.Diagnostics
         if ($state -ne $script:linkState) {
             if ($state -eq 'local') { Add-MonitorEvent $script:history $at 'Задержка или потери до роутера.' }
@@ -590,7 +765,7 @@ $poll.Add_Tick({
         $status.Text = "Замер $($at.ToString('HH:mm:ss'))  ·  Точек: $($script:points.Count)  ·  Золотой контур — свой канал. $script:storageNote"
     } catch {
         $script:streak.Clear()
-        Set-ProbeGateway $null
+        Set-WifiTelemetryRoute $null
         foreach ($band in $adviceLabels.Keys) { $adviceLabels[$band].Text = 'Ожидание свежего замера' }
         $status.Text = if ($script:lastScanAt) {
             "Обновление не удалось. Последний замер $($script:lastScanAt.ToString('HH:mm:ss'))."
@@ -639,7 +814,7 @@ $homeInput.Add_KeyDown({
     }
 })
 $autoRefresh.Add_Tick({ Start-Scan })
-$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan; $autoRefresh.Start(); $probeTimer.Start() })
+$form.Add_Shown({ Show-Events; Show-Tracking; Start-Scan; $autoRefresh.Start(); $probeTimer.Start(); $storageTimer.Start() })
 try {
     [void] $form.ShowDialog()
 } finally {
@@ -647,7 +822,14 @@ try {
     $poll.Dispose()
     $animation.Dispose()
     $probeTimer.Dispose()
+    $storageTimer.Dispose()
+    $closed = Complete-WifiEpisode $script:engine
+    if ($closed) { Add-MonitorEvent $script:history (Get-Date) $closed.Message }
+    Write-History
+    Write-Measurements
+    if ($script:database) { $script:database.Dispose() }
     $ping.Dispose()
+    $wanPing.Dispose()
     $toolTip.Dispose()
     if ($script:worker) { $script:worker.Dispose() }
     $form.Dispose()

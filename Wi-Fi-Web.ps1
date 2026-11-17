@@ -1,0 +1,286 @@
+﻿$ErrorActionPreference = 'Stop'
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'WebState.ps1')) {
+    . (Join-Path $PSScriptRoot $file)
+}
+Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
+
+function Save-WebHistory($Run) {
+    if (-not $Run.Database) { return }
+    try {
+        Set-DatabaseSetting $Run.Database 'history' (ConvertTo-Json -InputObject $Run.History -Depth 8 -Compress)
+        Set-DatabaseSetting $Run.Database 'home_ssid' $Run.HomeName
+    } catch { $Run.Storage = 'Не удалось сохранить историю SQLite.' }
+}
+
+function Save-WebMeasurements($Run, [long] $Now) {
+    $engine = $Run.Engine
+    if (-not $Run.Database) {
+        foreach ($buffer in @($engine.PendingSamples, $engine.PendingScans, $engine.PendingIncidents, $engine.PendingTrials, $engine.PendingChecks)) {
+            if ($buffer) { $buffer.Clear() }
+        }
+        return
+    }
+    try {
+        if ($engine.PendingSamples.Count -or $engine.PendingScans.Count -or $engine.PendingIncidents.Count -or
+                $engine.PendingTrials.Count -or $engine.PendingChecks.Count) {
+            Save-Intelligence $Run.Database $engine
+        }
+        if ($Now -ge $Run.NextPrune) {
+            Remove-ExpiredMeasurements $Run.Database $Now
+            $Run.NextPrune = $Now + 3600000
+        }
+        $Run.Storage = ''
+    } catch { $Run.Storage = 'SQLite временно недоступна. Повторю запись.' }
+}
+
+function Start-WebScan($Run, [long] $Now, [bool] $Force) {
+    if ($Run.Worker) { return }
+    $active = $Force -or ($Now - $Run.LastActive -ge 90000 -and -not $Run.Engine.Incident)
+    $Run.Active = $active
+    if ($active) { $Run.LastActive = $Now; $Run.WanSample = $null }
+    $Run.Worker = [PowerShell]::Create()
+    [void] $Run.Worker.AddCommand((Join-Path $PSScriptRoot 'ScanWorker.ps1'))
+    [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
+    [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
+    [void] $Run.Worker.AddArgument($active)
+    $Run.ScanTask = $Run.Worker.BeginInvoke()
+    $Run.NextScan = $Now + 30000
+}
+
+function Set-WebRoute($Run, $Diagnostics) {
+    if ([string] $Run.Gateway -eq [string] $Diagnostics.Gateway -and
+            [string] $Run.AdapterId -eq [string] $Diagnostics.AdapterId -and
+            $Run.WifiRoute -eq [bool] $Diagnostics.WifiRoute) { return }
+    $Run.Epoch++
+    $Run.Gateway = $Diagnostics.Gateway
+    $Run.WifiRoute = [bool] $Diagnostics.WifiRoute
+    $Run.AdapterId = $Diagnostics.AdapterId
+    $Run.Adapter = if ($Run.AdapterId) {
+        [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
+            Where-Object Id -eq $Run.AdapterId | Select-Object -First 1
+    }
+    $Run.WanSample = $null
+    $Run.Traffic = $null
+    $Run.Latency = @()
+}
+
+function Receive-WebScan($Run) {
+    try {
+        $result = $Run.Worker.EndInvoke($Run.ScanTask) | Select-Object -Last 1
+        if ($Run.Worker.HadErrors) { throw $Run.Worker.Streams.Error[0] }
+        if (-not $result) { throw 'Windows не вернула результат сканирования.' }
+        if ($result.Native) {
+            $connected = @($result.Native.Connected | Where-Object { $_ })
+            $Run.Points = @(ConvertFrom-NativeScan $result.Native $Run.HomeName)
+            $Run.Source = 'Windows WLAN'
+            $Run.ScanAt = $result.Native.FinishedAt
+        } else {
+            $connected = @(Get-ConnectedAddresses $result.Interfaces)
+            $Run.Points = @(Get-WifiPoints $result.Networks $connected $Run.HomeName)
+            $Run.Source = 'netsh'
+            $Run.ScanAt = Get-UnixMilliseconds
+        }
+        $Run.Issue = ''
+        $Run.Diagnostics = $result.Diagnostics
+        $Run.Link = Get-LinkState $result.Diagnostics
+        Set-WebRoute $Run $result.Diagnostics
+        $at = Get-Date
+        $radio = Get-WifiRadioContext $Run.Points $connected $Run.Engine.Radio $Run.ScanAt
+        Update-WifiRadio $Run.Engine $radio $Run.ScanAt
+        if ($Run.Database -and $Run.Engine.PendingScans.Count -lt 120) {
+            $Run.Engine.PendingScans.Add([pscustomobject] @{
+                At = $Run.ScanAt; Network = [string] $radio.Network; Points = $Run.Points
+            })
+        }
+        foreach ($band in @('2.4', '5')) {
+            $advice = Get-WifiRecommendation $Run.Points $band $connected $at $Run.Link $result.Native $Run.History `
+                $Run.Database $Run.Streak[$band] $Run.Forecast
+            $Run.Streak[$band] = $advice.Streak
+            $Run.Plans[$band] = $advice.Plan
+            $Run.Advice[$band] = $advice.Text
+            if ($advice.StorageNote) { $Run.Storage = $advice.StorageNote }
+        }
+        Update-TrackedPoint $Run.History $Run.Points $Run.Plans $at
+        Update-HeatHistory $Run.History $Run.Plans $at
+        Save-WebHistory $Run
+    } catch {
+        $Run.Issue = $_.Exception.GetBaseException().Message
+        $Run.Streak.Clear()
+        $Run.Advice.Clear()
+        $Run.Diagnostics = $null
+        $Run.Link = 'unknown'
+        Set-WebRoute $Run $null
+    } finally {
+        $Run.Worker.Dispose()
+        $Run.Worker = $null
+        $Run.ScanTask = $null
+        $Run.Active = $false
+    }
+}
+
+function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
+    $Run.Latency = @($Run.Latency | Where-Object { $At - $_.at -le 60000 }) +
+        @([pscustomobject] @{ at = $At; ms = $Milliseconds; lost = $Lost })
+    if ($Run.Active -or $Run.LanDuringScan) { return }
+    $radio = $Run.Engine.Radio
+    if ($radio -and ($At - $radio.At -gt 45000 -or
+            ($radio.ObservedAt -and $At - $radio.ObservedAt -gt 45000))) { $radio = $null }
+    $upload = $null
+    if ($Run.Adapter) {
+        try {
+            $bytes = $Run.Adapter.GetIPv4Statistics().BytesSent
+            $upload = Get-UploadRate $Run.Traffic $bytes $At
+            $Run.Traffic = @{ At = $At; Bytes = $bytes }
+        } catch { $Run.Traffic = $null }
+    }
+    $external = $Run.WanSample
+    $Run.WanSample = $null
+    if ($external -and $At - $external.At -gt 1400) { $external = $null }
+    $overlap = if ($radio) {
+        if ($radio.ChangedAt -gt 0 -and $At - $radio.ChangedAt -lt 45000) { 'changed' }
+        elseif ($radio.Signature) { 'strong' }
+        else { 'clear' }
+    }
+    $measurement = [pscustomobject] @{
+        At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Width = $radio.Width; Signal = $radio.Signal
+        Upload = $upload; Overlap = $overlap; Lan = $Milliseconds; LanLoss = $Lost
+        Wan = $external.Milliseconds; WanLoss = $external.Lost
+    }
+    $entries = @(Add-WifiSample $Run.Engine $measurement {
+        param($network, $context)
+        if ($Run.Database) {
+            try { Get-ForecastEvidence $Run.Database $network $context } catch { return }
+        }
+    })
+    foreach ($entry in $entries) {
+        Add-MonitorEvent $Run.History (Get-Date) $entry.Message
+        if ($entry.Forecast -and $radio) {
+            $Run.Forecast = @{ At = $At; Band = $radio.Band; Network = $radio.Network; Text = $entry.Message }
+            $Run.Advice[$radio.Band] = $entry.Message
+        }
+    }
+    if ($entries.Count) { Save-WebHistory $Run }
+}
+
+function Update-WebProbes($Run, [long] $Now) {
+    if ($Run.WanTask -and $Run.WanTask.IsCompleted) {
+        $task = $Run.WanTask
+        $Run.WanTask = $null
+        if ($task.Status -eq 'Faulted') { [void] $task.Exception }
+        if ($task.Status -eq 'RanToCompletion' -and -not $Run.Active -and $Run.WanEpoch -eq $Run.Epoch) {
+            $lost = $task.Result.Status -ne 'Success'
+            $Run.WanSample = @{ At = $Now; Lost = $lost; Milliseconds = if (-not $lost) { [int] $task.Result.RoundtripTime } }
+        }
+    }
+    if ($Run.WifiRoute -and $Run.Adapter -and -not $Run.Active -and -not $Run.WanTask -and $Now -ge $Run.NextWan) {
+        $Run.NextWan = $Now + 3000
+        try {
+            $route = Get-InternetRouteAddress $Run.WanTarget
+            if ($route -and ($Run.Adapter.GetIPProperties().UnicastAddresses | Where-Object { $_.Address.Equals($route) })) {
+                $Run.WanTask = $Run.WanPing.SendPingAsync($Run.WanTarget, 650)
+                $Run.WanEpoch = $Run.Epoch
+            }
+        } catch { $Run.WanTask = $null }
+    }
+    if ($Run.LanTask -and $Run.LanTask.IsCompleted) {
+        $task = $Run.LanTask
+        $Run.LanTask = $null
+        if ($task.Status -eq 'Faulted') { [void] $task.Exception }
+        if ($task.Status -eq 'RanToCompletion' -and $Run.LanEpoch -eq $Run.Epoch) {
+            $lost = $task.Result.Status -ne 'Success'
+            $ms = if (-not $lost) { [int] $task.Result.RoundtripTime }
+            Add-WebLatency $Run $Now $ms $lost
+        }
+    }
+    if ($Run.Gateway -and -not $Run.LanTask -and $Now -ge $Run.NextLan) {
+        $Run.NextLan = $Now + $(if ($Now -lt $Run.Engine.BurstUntil) { 350 } else { 1000 })
+        try {
+            $Run.LanTask = $Run.LanPing.SendPingAsync($Run.Gateway, 650)
+            $Run.LanEpoch = $Run.Epoch
+            $Run.LanDuringScan = $Run.Active
+        } catch { $Run.LanTask = $null }
+    }
+}
+
+$identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$mutex = [Threading.Mutex]::new($false, "Local\WiFiDashboard-$($identity.User.Value)")
+try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
+if (-not $ownsMutex) {
+    $mutex.Dispose()
+    throw 'Wi Fi уже запущен. Закрой предыдущий экземпляр и попробуй ещё раз.'
+}
+$run = @{
+    Engine = New-WifiIntelligence; History = New-MonitorHistory; Database = $null
+    HomeName = ''; Points = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @()
+    Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
+    NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
+    NextPrune = 0L
+}
+$server = $null
+try {
+    $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Wi Fi'
+    $legacy = Join-Path $folder 'history.json'
+    try {
+        $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
+        $run.HomeName = [string] (Get-DatabaseSetting $run.Database 'home_ssid')
+        $run.History = Get-DatabaseHistory $run.Database $legacy
+    } catch {
+        if ($run.Database) { $run.Database.Dispose(); $run.Database = $null }
+        try { $run.History = Read-MonitorHistory $legacy } catch { }
+        $run.Storage = 'SQLite недоступна. История этой сессии останется в памяти.'
+    }
+    $run.LanPing = [Net.NetworkInformation.Ping]::new()
+    $run.WanPing = [Net.NetworkInformation.Ping]::new()
+    $run.WanTarget = [Net.IPAddress]::Parse('1.1.1.1')
+    $server = [WiFi.WebServer]::new((Join-Path $PSScriptRoot 'web'))
+    Start-WebScan $run (Get-UnixMilliseconds) $true
+    $server.SetState((Get-WebState $run (Get-UnixMilliseconds) (Get-Date) | ConvertTo-Json -Depth 8 -Compress))
+    Write-Host "Wi Fi открыт по адресу $($server.Address). Для остановки нажми Ctrl+C."
+    try { Start-Process $server.Address } catch { }
+    $publishAt = 0L
+    $flushAt = 0L
+    while ($true) {
+        $now = Get-UnixMilliseconds
+        if ($run.Worker -and $run.ScanTask.IsCompleted) { Receive-WebScan $run }
+        while ($command = $server.TakeCommand()) {
+            switch ($command.Name) {
+                'refresh' { Start-WebScan $run $now $true }
+                'home' {
+                    if ($command.Value -cne $run.HomeName) {
+                        $run.HomeName = $command.Value
+                        Save-WebHistory $run
+                        Start-WebScan $run $now $true
+                    }
+                }
+                'track' {
+                    Set-WebTrackedPoint $run $command.Value (Get-Date)
+                    Save-WebHistory $run
+                }
+            }
+            $publishAt = 0L
+        }
+        if ($now -ge $run.NextScan) { Start-WebScan $run $now $false }
+        Update-WebProbes $run $now
+        if ($now -ge $flushAt) {
+            Save-WebMeasurements $run $now
+            $flushAt = $now + 10000
+        }
+        if ($now -ge $publishAt) {
+            $server.SetState((Get-WebState $run $now (Get-Date) | ConvertTo-Json -Depth 8 -Compress))
+            $publishAt = $now + 850
+        }
+        Start-Sleep -Milliseconds 90
+    }
+} finally {
+    if ($server) { $server.Dispose() }
+    if ($run.Worker) { $run.Worker.Dispose() }
+    $entry = Complete-WifiEpisode $run.Engine
+    if ($entry) { Add-MonitorEvent $run.History (Get-Date) $entry.Message }
+    Save-WebHistory $run
+    Save-WebMeasurements $run (Get-UnixMilliseconds)
+    if ($run.Database) { $run.Database.Dispose() }
+    if ($run.LanPing) { $run.LanPing.Dispose() }
+    if ($run.WanPing) { $run.WanPing.Dispose() }
+    $mutex.ReleaseMutex()
+    $mutex.Dispose()
+}

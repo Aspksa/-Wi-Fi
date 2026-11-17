@@ -4,6 +4,7 @@
 . (Join-Path $PSScriptRoot 'Visuals.ps1')
 . (Join-Path $PSScriptRoot 'Intelligence.ps1')
 . (Join-Path $PSScriptRoot 'Database.ps1')
+. (Join-Path $PSScriptRoot 'Recommendation.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -338,67 +339,6 @@ function Draw-Heatmap($Panel, $Graphics) {
         $labelBrush.Dispose()
     }
 }
-$scanScript = {
-    param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan)
-    $ErrorActionPreference = 'Stop'
-    . $DiagnosticsScript
-
-    function Invoke-Netsh([string] $Arguments) {
-        $process = New-Object Diagnostics.Process
-        $process.StartInfo.FileName = Join-Path ([Environment]::SystemDirectory) 'netsh.exe'
-        $process.StartInfo.Arguments = $Arguments
-        $process.StartInfo.UseShellExecute = $false
-        $process.StartInfo.CreateNoWindow = $true
-        $process.StartInfo.RedirectStandardOutput = $true
-        $process.StartInfo.RedirectStandardError = $true
-        $codePage = [Globalization.CultureInfo]::InstalledUICulture.TextInfo.OEMCodePage
-        $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::GetEncoding($codePage)
-        try {
-            [void] $process.Start()
-            $stdout = $process.StandardOutput.ReadToEndAsync()
-            $stderr = $process.StandardError.ReadToEndAsync()
-            if (-not $process.WaitForExit(7000)) {
-                $process.Kill()
-                throw 'Сканирование Wi-Fi не ответило вовремя.'
-            }
-            [pscustomobject] @{
-                Code = $process.ExitCode
-                Text = $stdout.GetAwaiter().GetResult()
-                ErrorText = $stderr.GetAwaiter().GetResult()
-            }
-        } finally {
-            $process.Dispose()
-        }
-    }
-
-    $radio = try {
-        if (-not ('WiFi.NativeScanner' -as [type])) { Add-Type -Path $NativeSource -ErrorAction Stop }
-        $wait = if ($ActiveScan) { 4000 } else { 0 }
-        [WiFi.NativeScanner]::Scan($wait)
-    } catch { $null }
-    if ($radio) {
-        $diagnostics = try { Get-WifiDiagnostics } catch { $null }
-        return [pscustomobject] @{ Native = $radio; Diagnostics = $diagnostics }
-    }
-
-    $networks = Invoke-Netsh 'wlan show networks mode=bssid'
-    $output = $networks.Text + ' ' + $networks.ErrorText
-    if ($output -match '(?i)location|местоположени|расположени|access (?:is )?denied|отказано в доступе|elevation|повышени.+прав') {
-        if ($networks.Code -ne 0 -or $networks.Text -notmatch '(?m)^\s*SSID\s+\d+\s*:') {
-            throw 'Windows ограничила доступ. Проверь разрешение на определение местоположения и права учётной записи.'
-        }
-    }
-    if ($output -match '(?i)(?:not running|не запущена|не запущен|no wireless interface|беспроводн\w+ интерфейс\w+ отсутств|нет беспроводн|не найдено беспроводн)') {
-        throw 'Адаптер Wi-Fi недоступен. Проверь, включены ли адаптер и служба WLAN.'
-    }
-    if ($networks.Code -ne 0) {
-        throw "Windows не завершила сканирование (код $($networks.Code))."
-    }
-    $interfaces = Invoke-Netsh 'wlan show interfaces'
-    $diagnostics = try { Get-WifiDiagnostics } catch { $null }
-    [pscustomobject] @{ Networks = $networks.Text; Interfaces = $interfaces.Text; Diagnostics = $diagnostics }
-}
-
 function Write-History {
     if (-not $script:database) { return }
     try {
@@ -524,58 +464,12 @@ function Show-Diagnostics($Snapshot, [string] $State) {
 
 function Update-Recommendations([datetime] $At, [string[]] $Connected, [string] $State, $Native) {
     foreach ($band in @('2.4', '5')) {
-        $plan = Get-ChannelPlan $script:points $band $Connected
-        if ($plan.Home) {
-            $past = Get-PastScores $script:history $At $band $plan.Current.Width
-            $memory = @{}
-            if ($script:database) {
-                try {
-                    $memory = Get-TrialMemory $script:database (Get-WifiNetworkKey $plan.Home) $plan.Home.Channel $plan.Current.Width
-                } catch { $script:storageNote = 'Не удалось прочитать результаты прошлых смен канала.' }
-            }
-            if ($past.Count -or $memory.Count) { $plan = Get-ChannelPlan $script:points $band $Connected $past $memory }
-        }
-        $script:plans[$band] = $plan
-        $bandText = $band.Replace('.', ',') + ' ГГц'
-        $previous = $script:streak[$band]
-        $observation = Get-ScanObservationKey $Native $script:points $band $At
-        $count = 0
-        $key = "$($plan.Home.BSSID)|$($plan.Home.Channel)/$($plan.Current.Width)|$($plan.Best.Channel)/$($plan.Best.Width)"
-        $choice = if ($plan.Best.Width) {
-            "$($plan.Best.Channel) / $($plan.Best.Width) МГц"
-        } else { "$($plan.Best.Channel)" }
-        if ($Native -and -not $observation) {
-            $message = 'Ожидание свежего снимка эфира.'
-        } elseif (-not $plan.Home) {
-            $message = 'Укажи SSID, чтобы определить свой канал.'
-        } elseif ($State -eq 'external') {
-            $message = "Канал $($plan.Home.Channel). Проблема видна только до внешнего адреса."
-        } elseif ($plan.Improves) {
-            $count = 1
-            if ($previous -and $previous.Key -eq $key) {
-                $count = $previous.Samples
-                if ($previous.Observation -ne $observation) { $count++ }
-            }
-            if ($count -ge 3) {
-                $current = $plan.Current
-                $message = if ($plan.TrialSupport) {
-                    "Канал $choice · помогло в $($plan.TrialSupport.Wins) прошлых сравнениях."
-                } else {
-                    "Канал $choice · оценка помех $($current.Score) → $($plan.Best.Score)."
-                }
-                if ($count -eq 3 -and $previous.Samples -lt 3) { Add-MonitorEvent $script:history $At "$bandText · совет: $message" }
-            } else {
-                $message = "Кандидат $choice · подтверждение $count из 3."
-            }
-        } elseif ($script:forecast -and $script:forecast.Band -eq $band -and
-                $script:forecast.Network -eq (Get-WifiNetworkKey $plan.Home) -and
-                (Get-UnixMilliseconds) - $script:forecast.At -lt 60000) {
-            $message = $script:forecast.Text
-        } else {
-            $message = "Канал $($plan.Home.Channel). Выигрыш от смены пока не виден."
-        }
-        $script:streak[$band] = @{ Key = $key; Samples = $count; Observation = $observation }
-        $adviceLabels[$band].Text = "$bandText · $message"
+        $result = Get-WifiRecommendation $script:points $band $Connected $At $State $Native $script:history `
+            $script:database $script:streak[$band] $script:forecast
+        $script:plans[$band] = $result.Plan
+        $script:streak[$band] = $result.Streak
+        if ($result.StorageNote) { $script:storageNote = $result.StorageNote }
+        $adviceLabels[$band].Text = "$($band.Replace('.', ',')) ГГц · $($result.Text)"
         $mapPanels[$band].Invalidate()
     }
 }
@@ -751,7 +645,7 @@ function Start-Scan([bool] $Force = $false) {
     $refresh.Enabled = $false
     $status.Text = 'Обновление Wi-Fi и диагностики…'
     $script:worker = [PowerShell]::Create()
-    [void] $script:worker.AddScript($scanScript.ToString())
+    [void] $script:worker.AddCommand((Join-Path $PSScriptRoot 'ScanWorker.ps1'))
     [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
     [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
     [void] $script:worker.AddArgument($active)

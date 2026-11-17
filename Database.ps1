@@ -5,12 +5,12 @@
     [void] [IO.Directory]::CreateDirectory((Split-Path -Parent $Path))
     $db = [WiFi.Sqlite]::new($Path)
     try {
-        $version = $db.Query('PRAGMA user_version', @())[0][0]
-        if ($version -gt 1) { throw 'База Wi Fi создана более новой версией программы.' }
         [void] $db.Query('PRAGMA journal_mode=WAL', @())
         [void] $db.Query('PRAGMA synchronous=NORMAL', @())
         [void] $db.Query('BEGIN IMMEDIATE', @())
         try {
+            $version = $db.Query('PRAGMA user_version', @())[0][0]
+            if ($version -gt 2) { throw 'База Wi Fi создана более новой версией программы.' }
             [void] $db.Query('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)', @())
             [void] $db.Query(@'
 CREATE TABLE IF NOT EXISTS samples (
@@ -48,7 +48,12 @@ CREATE TABLE IF NOT EXISTS context_checks (
 )
 '@, @())
             [void] $db.Query('CREATE INDEX IF NOT EXISTS checks_network_context ON context_checks(network, context, at_ms)', @())
-            [void] $db.Query('PRAGMA user_version=1', @())
+            if ($version -lt 2) {
+                [void] $db.Query('ALTER TABLE samples ADD COLUMN width_mhz INTEGER', @())
+                [void] $db.Query('ALTER TABLE channel_trials ADD COLUMN old_width_mhz INTEGER', @())
+                [void] $db.Query('ALTER TABLE channel_trials ADD COLUMN new_width_mhz INTEGER', @())
+                [void] $db.Query('PRAGMA user_version=2', @())
+            }
             [void] $db.Query('COMMIT', @())
         } catch {
             [void] $db.Query('ROLLBACK', @())
@@ -84,9 +89,13 @@ function Save-Intelligence($Db, $Engine) {
     [void] $Db.Query('BEGIN IMMEDIATE', @())
     try {
         foreach ($sample in $Engine.PendingSamples) {
-            [void] $Db.Query('INSERT OR IGNORE INTO samples VALUES(?,?,?,?,?,?,?,?,?,?,?)', @(
+            [void] $Db.Query(@'
+INSERT OR IGNORE INTO samples
+    (session_id, at_ms, network, channel, signal, upload_kbps, overlap, lan, lan_loss, wan, wan_loss, width_mhz)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+'@, @(
                 $Engine.Session, $sample.At, $sample.Network, $sample.Channel, $sample.Signal, $sample.Upload, $sample.Overlap,
-                $sample.Lan, $sample.LanLoss, $sample.Wan, $sample.WanLoss
+                $sample.Lan, $sample.LanLoss, $sample.Wan, $sample.WanLoss, $sample.Width
             ))
         }
         foreach ($entry in $Engine.PendingScans) {
@@ -100,9 +109,14 @@ function Save-Intelligence($Db, $Engine) {
             ))
         }
         foreach ($entry in $Engine.PendingTrials) {
-            [void] $Db.Query('INSERT OR IGNORE INTO channel_trials VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', @(
+            [void] $Db.Query(@'
+INSERT OR IGNORE INTO channel_trials
+    (id, at_ms, network, old_channel, new_channel, improved, before_bad, after_bad, pairs,
+     before_p90, after_p90, description, old_width_mhz, new_width_mhz)
+VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+'@, @(
                 $entry.Id, $entry.At, $entry.Network, $entry.Old, $entry.New, $entry.Improved, $entry.BeforeBad,
-                $entry.AfterBad, $entry.Pairs, $entry.BeforeP90, $entry.AfterP90, $entry.Message
+                $entry.AfterBad, $entry.Pairs, $entry.BeforeP90, $entry.AfterP90, $entry.Message, $entry.OldWidth, $entry.NewWidth
             ))
         }
         foreach ($entry in $Engine.PendingChecks) {
@@ -130,15 +144,16 @@ function Remove-ExpiredMeasurements($Db, [long] $Now) {
     [void] $Db.Query('DELETE FROM context_checks WHERE at_ms < ?', @($Now - 30L * 86400000))
 }
 
-function Get-TrialMemory($Db, [string] $Network, [int] $Channel) {
+function Get-TrialMemory($Db, [string] $Network, [int] $Channel, [Nullable[int]] $Width) {
     $rows = $Db.Query(@'
 SELECT new_channel, COUNT(*), SUM(CASE WHEN improved > 0 THEN 1 ELSE 0 END),
-       SUM(CASE WHEN improved < 0 THEN 1 ELSE 0 END), SUM(before_bad), SUM(after_bad), SUM(pairs)
-FROM channel_trials WHERE network=? AND old_channel=? AND improved IS NOT NULL GROUP BY new_channel
-'@, @($Network, $Channel))
+       SUM(CASE WHEN improved < 0 THEN 1 ELSE 0 END), SUM(before_bad), SUM(after_bad), SUM(pairs), new_width_mhz
+FROM channel_trials WHERE network=? AND old_channel=? AND old_width_mhz IS ? AND improved IS NOT NULL
+GROUP BY new_channel, new_width_mhz
+'@, @($Network, $Channel, $Width))
     $memory = @{}
     foreach ($row in $rows) {
-        $memory[[int] $row[0]] = [pscustomobject] @{
+        $memory[(Get-WidthTrialKey $row[0] $row[7])] = [pscustomobject] @{
             Count = $row[1]; Wins = $row[2]; Losses = $row[3]; BeforeBad = $row[4]; AfterBad = $row[5]; Pairs = $row[6]
         }
     }

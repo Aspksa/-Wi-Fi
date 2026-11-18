@@ -97,8 +97,8 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         adapterSummary = Get-WifiAdapterSummary $Session.Adapter
         interference = @((Get-WifiInterferenceEvidence @($Session.Points) '2.4'), (Get-WifiInterferenceEvidence @($Session.Points) '5'))
         recommendationConfidence = @{
-            '2.4' = Get-WifiRecommendationConfidence $Session.RecommendationGuards['2.4'] (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)
-            '5' = Get-WifiRecommendationConfidence $Session.RecommendationGuards['5'] (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)
+            '2.4' = Get-WifiRecommendationConfidence $(if($Session.RecommendationGuards){$Session.RecommendationGuards['2.4']}) (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)
+            '5' = Get-WifiRecommendationConfidence $(if($Session.RecommendationGuards){$Session.RecommendationGuards['5']}) (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)
         }
         health = Get-WebHealth $Session $Now
         router = $Session.Router

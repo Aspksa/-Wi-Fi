@@ -41,6 +41,7 @@ $db | Add-Member ScriptMethod Query { param($sql,$params)
     return ,@(@('2.4|test',6,20,100,30,3,1,8.5))
 }
 $history=@(Get-WifiHourlyEfficiency $db $now)
+Write-Host ('Hour rows: '+($history | ConvertTo-Json -Depth 5 -Compress))
 Assert ($history.Count -eq 1 -and $history[0].channel -eq 6 -and $history[0].badPercent -eq 10) 'SQLite hourly aggregates'
 $trials=@(Get-WifiRecentTrials $db $now)
 Assert ($trials.Count -eq 1 -and $trials[0].outcome -eq 'improved') 'Previous manual changes exposed'

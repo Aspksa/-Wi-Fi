@@ -356,7 +356,11 @@ function renderState(next) {
   byId("router-source").textContent = telemetry ? "Импорт RE3L" : "Windows / шлюз";
   byId("router-identity").textContent = "Адрес: " + (router.address || "не определён") +
     " · Модель: " + (router.model || "не подтверждена") + " · Прошивка: " + (router.firmware || "неизвестна");
-  byId("router-capabilities").textContent = router.explanation || "Доступность функций API пока неизвестна.";
+  const cap = router.capabilities || {};
+  const hint = key => cap[key] === "interface-hint" ? "упоминание на странице (не проверено)" : "не подтверждено";
+  byId("router-capabilities").textContent = (router.explanation || "Доступность функций API пока неизвестна.") +
+    " · Соседние сети: " + hint("scan") + " · Настройки каналов: " + hint("channel") +
+    " · Эфирное время: " + hint("radio") + " · API изменения и отката: не подтверждено.";
   const airtime = telemetry?.airtime || [];
   byId("router-airtime").textContent = airtime.length ?
     "Показатели из импорта (не проверены): " + airtime.map(item => item.band + " ГГц, канал " + item.channel + " · " + item.busyPercent + "%").join("; ") :

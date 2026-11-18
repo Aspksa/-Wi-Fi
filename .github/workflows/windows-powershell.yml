@@ -17,6 +17,9 @@ jobs:
       - name: Router identification and diagnostics
         shell: powershell
         run: .\\tests\\RouterDiscovery.Tests.ps1
+      - name: Measured channel comparison tests
+        shell: powershell
+        run: .\\tests\\RouterDecision.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

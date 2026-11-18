@@ -72,3 +72,48 @@ function Get-WifiRecommendationConfidence($Guard,[string]$ScanConfidence,[int]$I
         automaticChange=$false
     }
 }
+
+
+function Get-WifiHourlyNeighborDensity($Db,[long]$Now,[object[]]$HourlyQuality) {
+    if (-not $Db) {return @()}
+    $rows=$Db.Query(@'
+SELECT CAST(at_ms / 3600000 AS INTEGER), observed_points
+FROM radio_scans
+WHERE at_ms >= ? AND at_ms <= ?
+ORDER BY at_ms DESC LIMIT 240
+'@,@(($Now-48L*3600000),$Now))
+    $groups=@{}
+    foreach($row in @($rows)) {
+        try {
+            $points=@(ConvertFrom-Json -InputObject ([string]$row[1]) -ErrorAction Stop)
+            foreach($band in @('2.4','5')) {
+                $neighbors=@($points | Where-Object {$_.Band -eq $band -and -not $_.Own -and $_.Fresh -ne $false -and $_.BSSID} |
+                    Group-Object BSSID)
+                $key='{0}|{1}' -f $row[0],$band
+                if(-not $groups.ContainsKey($key)) {
+                    $groups[$key]=[pscustomobject]@{
+                        hourUtc=([DateTimeOffset]::FromUnixTimeMilliseconds([long]$row[0]*3600000)).ToString('yyyy-MM-dd HH:mm')
+                        band=$band;scans=0;sum=0;max=0
+                    }
+                }
+                $group=$groups[$key]
+                $group.scans++
+                $group.sum+=$neighbors.Count
+                $group.max=[Math]::Max($group.max,$neighbors.Count)
+            }
+        } catch {continue}
+    }
+    $result=@()
+    foreach($group in $groups.Values) {
+        if($group.scans -lt 2) {continue}
+        $matching=@($HourlyQuality | Where-Object {$_.band -eq $group.band -and $_.hourUtc -eq $group.hourUtc -and $_.samples -ge 10})
+        $quality=$(if($matching.Count){[Math]::Round([double](@($matching | Measure-Object badPercent -Average)[0].Average),1)}else{$null})
+        $result += [pscustomobject]@{
+            hourUtc=$group.hourUtc;band=$group.band;scans=$group.scans
+            averageNeighbors=[Math]::Round($group.sum/$group.scans,1)
+            maxNeighbors=$group.max;localBadPercent=$quality
+            correlation='unverified'
+        }
+    }
+    @($result | Sort-Object hourUtc -Descending | Select-Object -First 30)
+}

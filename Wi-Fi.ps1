@@ -652,15 +652,16 @@ $animation.Add_Tick({
 function Start-Scan([bool] $Force = $false) {
     if ($script:worker) { return }
     $now = $clock.Elapsed.TotalSeconds
-    $active = $Force -or ($now - $script:lastActiveRadioScan -ge 90 -and -not $script:engine.Incident)
+    $diagnosticsOnly = [bool] ($script:scanBlocked -and -not $Force)
+    $active = -not $diagnosticsOnly -and ($Force -or ($now - $script:lastActiveRadioScan -ge 90 -and -not $script:engine.Incident))
     $script:activeRadioScan = $active
     if ($active) {
         $script:lastActiveRadioScan = $now
         $script:wanResult = $null
     }
     $refresh.Enabled = $false
-    $status.Text = 'Обновление Wi-Fi и диагностики…'
-    try { $script:worker = Start-WifiScanJob $active }
+    $status.Text = if ($diagnosticsOnly) { 'Обновление диагностики связи…' } else { 'Обновление Wi-Fi и диагностики…' }
+    try { $script:worker = Start-WifiScanJob $active $diagnosticsOnly }
     catch {
         $status.Text = $_.Exception.GetBaseException().Message
         $script:activeRadioScan = $false
@@ -677,6 +678,25 @@ $poll.Add_Tick({
     try {
         $result = Receive-WifiScanJob $script:worker
         $script:retryScanAt = 0L
+        $script:scanBlocked = [bool] $result.ScanBlocked
+        if ($script:scanBlocked) {
+            $script:points = @()
+            $script:trail = $null
+            $script:streak.Clear()
+            $script:plans.Clear()
+            $script:forecast = $null
+            Set-WifiTelemetryRoute $result.Diagnostics
+            Update-WifiRadio $script:engine $null (Get-UnixMilliseconds)
+            $script:linkState = Get-LinkState $result.Diagnostics
+            Show-Diagnostics $result.Diagnostics $script:linkState
+            foreach ($band in $adviceLabels.Keys) {
+                $adviceLabels[$band].Text = 'Для совета нужен снимок эфира.'
+                $mapPanels[$band].Invalidate()
+            }
+            Show-Networks
+            $status.Text = 'Диагностика связи · Сканирование ограничено Windows.'
+            return
+        }
         $previousPoints = $script:points
         if ($result.Native) {
             $connectedAddresses = @($result.Native.Connected | Where-Object { $_ })

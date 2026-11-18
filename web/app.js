@@ -66,6 +66,7 @@ function child(tag, text, className) {
 function renderStatus() {
   const status = byId("connection");
   const health = state?.health;
+  const scanBlocked = health?.scan === "blocked";
   const stalled = connected && performance.now() - receivedAt > 6500;
   const fault = !connected || stalled || Boolean(state?.issue || state?.storage) ||
     health?.scan === "stale" || health?.scan === "slow";
@@ -73,15 +74,15 @@ function renderStatus() {
   status.classList.toggle("fault", fault);
   status.lastElementChild.textContent = !connected ? "Нет связи" :
     stalled ? "Обновления остановились" : fault ? "Нужна проверка" :
-    state?.scanning ? "Сканирование" : "Локальный режим";
+    scanBlocked ? "Диагностика связи" : state?.scanning ? "Сканирование" : "Локальный режим";
   byId("refresh").disabled = Boolean(connected && state?.scanning);
   byId("scan-meta").textContent = state?.scanAt ?
     new Date(state.scanAt).toLocaleTimeString("ru-RU") + " · " + state.source + " · " + state.points.length + " точек" :
-    "Ожидание первого замера";
+    scanBlocked ? "Показываем задержку и потери" : "Ожидание первого замера";
   const adapter = { pending: "Проверка адаптера", ready: "Адаптер доступен", unverified: "Адаптер не подтверждён" };
   const scan = {
     pending: "Ждём первый замер", failed: "Ошибка сканирования", empty: "Точек доступа не видно",
-    slow: "Windows долго не завершает сканирование",
+    blocked: "Сканирование ограничено Windows", slow: "Windows долго не завершает сканирование",
     unverified: "Возраст замеров неизвестен", fresh: "Свежие замеры", stale: "Замеры устарели",
   };
   const storage = { ready: "SQLite доступна", degraded: "Ошибка SQLite", unavailable: "SQLite недоступна" };
@@ -132,7 +133,10 @@ function renderHeat() {
 }
 
 function renderLists() {
-  const pointSignature = state.points.length ? JSON.stringify(state.points) : String(state.scanning);
+  const scanBlocked = state.health?.scan === "blocked";
+  const emptyText = scanBlocked ? "Сканирование ограничено Windows." :
+    state.scanning ? "Ожидание сканирования." : "Видимых точек нет.";
+  const pointSignature = state.points.length ? JSON.stringify(state.points) : emptyText;
   if (pointSignature !== renderedPoints) {
     renderedPoints = pointSignature;
     const rows = [...state.points].sort((a, b) => Number(b.own) - Number(a.own) || Number(a.stale) - Number(b.stale) || b.signal - a.signal).map((point) => {
@@ -153,7 +157,7 @@ function renderLists() {
     });
     if (!rows.length) {
       const row = child("tr");
-      const empty = child("td", state.scanning ? "Ожидание сканирования." : "Видимых точек нет.", "empty");
+      const empty = child("td", emptyText, "empty");
       empty.colSpan = 5;
       row.append(empty);
       rows.push(row);
@@ -384,7 +388,9 @@ function drawBand(band, now) {
 
   if (points.length === 0) {
     context.font = '12px "Segoe UI", sans-serif';
-    context.fillText(state?.scanning ? "Сканирование эфира" : "Видимых точек пока нет", width / 2, floor / 2);
+    const message = state?.health?.scan === "blocked" ? "Сканирование недоступно" :
+      state?.scanning ? "Сканирование эфира" : "Видимых точек пока нет";
+    context.fillText(message, width / 2, floor / 2);
   }
 
   for (const point of [...points].sort((a, b) => Number(a.own) - Number(b.own) || a.signal - b.signal)) {

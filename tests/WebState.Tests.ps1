@@ -85,6 +85,10 @@ $healthRun.Storage = 'Write failed'
 $health = Get-WebHealth $healthRun 101000L
 Assert ($health.scan -eq 'failed' -and $health.adapter -eq 'unverified' -and $health.storage -eq 'degraded') 'WLAN and storage failures can be reported together'
 
+$blocked = @{ ScanBlocked = $true; Diagnostics = @{ AdapterId = 'wifi' }; Database = $true }
+$blockedHealth = Get-WebHealth $blocked 100000L
+Assert ($blockedHealth.adapter -eq 'ready' -and $blockedHealth.scan -eq 'blocked') 'A connected adapter remains available when Windows blocks spectrum scanning'
+
 $server = [WiFi.WebServer]::new((Join-Path $project 'web'))
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.UseProxy = $false

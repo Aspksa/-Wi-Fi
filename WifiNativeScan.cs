@@ -34,6 +34,11 @@ namespace WiFi
         public bool WifiDirect { get; internal set; }
         public bool Truncated { get; internal set; }
         public int ParsedElements { get; internal set; }
+        public int UnknownElements { get; internal set; }
+        public int? RsnVersion { get; internal set; }
+        public bool MalformedRsn { get; internal set; }
+        public bool HeOperation { get; internal set; }
+        public bool EhtOperation { get; internal set; }
         public string Generation { get { return Eht ? "Wi-Fi 7 capable" :
             He ? "Wi-Fi 6 capable" : Vht ? "Wi-Fi 5 capable" :
             Ht ? "Wi-Fi 4 capable" : "unverified"; } }
@@ -328,14 +333,21 @@ namespace WiFi
                 data.ParsedElements++;
                 if (id == 45 || id == 61) { data.Ht = true; }
                 if (id == 191 || id == 192) { data.Vht = true; }
-                if (id == 48) { data.Rsn = true; }
+                if (id == 48) {
+                    data.Rsn = true;
+                    if (length >= 2) { data.RsnVersion = bytes[i] + 256 * bytes[i + 1]; }
+                    else { data.MalformedRsn = true; }
+                }
                 if (id == 255 && length >= 2)
                 {
                     // 802.11 extended IE identifiers: HE Capabilities/Operation 35/36,
                     // EHT Operation 106, EHT Capabilities 108.
                     int ext = bytes[i];
                     if (ext == 35 || ext == 36) { data.He = true; }
+                    if (ext == 36) { data.HeOperation = true; }
                     if (ext == 106 || ext == 108) { data.Eht = true; }
+                    if (ext == 106) { data.EhtOperation = true; }
+                    if (ext != 35 && ext != 36 && ext != 106 && ext != 108) { data.UnknownElements++; }
                 }
                 if (id == 221 && length >= 4 &&
                     bytes[i] == 0x50 && bytes[i + 1] == 0x6f &&
@@ -343,6 +355,9 @@ namespace WiFi
                 {
                     data.WifiDirect = true; // P2P vendor IE, not confirmed device discovery.
                 }
+                if (id != 0 && id != 1 && id != 3 && id != 5 &&
+                    id != 45 && id != 48 && id != 61 && id != 191 &&
+                    id != 192 && id != 221 && id != 255) { data.UnknownElements++; }
                 i += length;
             }
             if (bytes.Length > 0 && data.ParsedElements == 0) { data.Truncated = true; }

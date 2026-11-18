@@ -176,3 +176,6 @@ tr.stale { color: var(--dim); }
 
 .router-v22{padding:0 12px 12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:9px}
 .router-v22 p{margin:0;padding:10px 12px;border:1px solid var(--line,#34392e);border-radius:8px;color:var(--muted,#a7afa5);font-size:.84rem;line-height:1.55;overflow-wrap:anywhere}
+
+#wifi-adapter-select {display:block;max-width:100%;min-width:210px;margin-top:6px;background:#141915;color:#e9d6ae;border:1px solid #65512f;border-radius:6px;padding:6px 10px;font:12px var(--mono);}
+#wifi-adapter-select:focus-visible {outline:2px solid var(--gold);outline-offset:2px;}

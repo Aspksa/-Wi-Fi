@@ -63,6 +63,7 @@ function Set-WebRoute($Run, $Diagnostics) {
         [Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces() |
             Where-Object Id -eq $Run.AdapterId | Select-Object -First 1
     }
+    $Run.AdapterDriverVersion = Get-WifiAdapterDriverVersion $Run.Adapter
     $Run.WanSample = $null
     $Run.Traffic = $null
     $Run.Latency = @()
@@ -304,7 +305,7 @@ $run = @{
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
     RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
-    ScanFailures=0; NativeCompleted=$false
+    ScanFailures=0; NativeCompleted=$false; AdapterDriverVersion=''
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()

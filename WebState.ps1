@@ -6,7 +6,7 @@ function ConvertTo-WebPoint($Point, $Tracked) {
     $shape = Get-SignalFootprint $Point.Band $Point.Channel $Point
     [pscustomobject] @{
         id = Get-WebPointId $Point
-        name = if ($Point.SSID) { $Point.SSID } else { 'Скрытая сеть' }
+        name = $(if ($Point.SSID) { $Point.SSID } else { 'Скрытая сеть' })
         band = $Point.Band
         channel = $Point.Channel
         signal = $Point.Signal
@@ -34,7 +34,7 @@ function Get-WebHeat($History, [datetime] $At, [string] $Band) {
         $value = $lookup[$key]
         [pscustomobject] @{
             hour = $hour.ToString('HH:mm')
-            score = if ($value.OwnCount -gt 0) { [Math]::Round($value.OwnSum / $value.OwnCount) }
+            score = $(if ($value.OwnCount -gt 0) { [Math]::Round($value.OwnSum / $value.OwnCount) })
         }
     }
 }
@@ -69,7 +69,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
                 [pscustomobject] @{
                     channel = $plan.Best.Channel; width = $plan.Best.Width; frequency = $footprint.Primary
                     segments = @(Get-SignalSegments $footprint)
-                    confirmed = [bool] ($Session.Streak -and $Session.Streak[$band].Samples -ge 3)
+                    confirmed = [bool] ($Session.Streak -and $Session.Streak[$band].Confirmed)
                     fromScore = $plan.Current.Score; toScore = $plan.Best.Score
                 }
             }
@@ -79,7 +79,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
             channel = $plan.Home.Channel
             width = $plan.Current.Width
             preview = $preview
-            advice = if ($suggestion) { $suggestion } else { 'Ожидание первого замера.' }
+            advice = $(if ($suggestion) { $suggestion } else { 'Ожидание первого замера.' })
             heat = @(Get-WebHeat $Session.History $At $band)
         }
     }
@@ -130,7 +130,7 @@ function Get-SpectrumFrame([long] $At, [object[]] $Points) {
     })
     [pscustomobject] @{
         at = $At
-        key = if ($timestamps.Count) { $timestamps -join '|' } else { "scan/$At" }
+        key = $(if ($timestamps.Count) { $timestamps -join '|' } else { "scan/$At" })
         points = @(foreach ($point in $fresh) { ConvertTo-WebPoint $point $null })
     }
 }

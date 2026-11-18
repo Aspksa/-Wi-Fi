@@ -170,3 +170,15 @@ SELECT COUNT(*), COALESCE(SUM(actual),0), COALESCE(SUM(predicted),0),
         [pscustomobject] @{ Count = $rows[0][0]; Bad = $rows[0][1]; Predicted = $rows[0][2]; Correct = $rows[0][3] }
     }
 }
+
+function Get-RecentChannelScans($Db, [long] $Before) {
+    $rows = $Db.Query(@'
+SELECT at_ms, observed_points FROM radio_scans WHERE at_ms >= ? AND at_ms < ?
+ORDER BY at_ms DESC LIMIT 40
+'@, @($Before - 900000, $Before))
+    foreach ($row in $rows) {
+        try {
+            [pscustomobject] @{ At = $row[0]; Points = @($row[1] | ConvertFrom-Json -ErrorAction Stop) }
+        } catch { continue }
+    }
+}

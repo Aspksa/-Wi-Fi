@@ -4,6 +4,7 @@ $project = Split-Path -Parent $PSScriptRoot
 . (Join-Path $project 'Monitor.ps1')
 . (Join-Path $project 'Intelligence.ps1')
 . (Join-Path $project 'Database.ps1')
+. (Join-Path $project 'Recommendation.ps1')
 
 function Assert($Value, [string] $Message) {
     if (-not $Value) { throw $Message }
@@ -12,9 +13,9 @@ function Assert($Value, [string] $Message) {
 function New-Point([int] $Channel, [int] $Width, [int] $Center, [bool] $Owned) {
     [pscustomobject] @{
         Channel = $Channel; Band = '5'; Frequency = 5000 + 5 * $Channel
-        BSSID = if ($Owned) { '00:00:00:00:00:01' } else { '00:00:00:00:00:02' }
+        BSSID = $(if ($Owned) { '00:00:00:00:00:01' } else { '00:00:00:00:00:02' })
         Own = $Owned; Fresh = $true; Signal = 94; SSID = 'Тест'
-        RadioWidth = if ($Width) { @{ Width = $Width; Center = $Center } }
+        RadioWidth = $(if ($Width) { @{ Width = $Width; Center = $Center } })
     }
 }
 
@@ -103,3 +104,14 @@ CREATE TABLE channel_trials (
     Remove-Item -LiteralPath $folder -Recurse -ErrorAction SilentlyContinue
 }
 'Passed 16 channel-width and migration checks'
+
+$baselinePoint = New-Point 40 160 5250 $true
+$baselinePoint | Add-Member -NotePropertyName ObservedAt -NotePropertyValue 100000L
+$interferer = New-Point 56 20 5280 $false
+$replayPlan = Get-ChannelPlan @($baselinePoint, $interferer) '5' @($baselinePoint.BSSID)
+$frames = @(
+    @{ At = 101000L; Points = @($baselinePoint, $interferer) }
+    @{ At = 110000L; Points = @($baselinePoint, $interferer) }
+)
+$replayed = Get-ChannelReplay $replayPlan $frames 120000L
+Assert ($replayed.Count -eq 1 -and $replayed.Wins -eq 1) 'Reading the same native frame twice does not confirm a recommendation'

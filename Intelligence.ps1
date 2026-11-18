@@ -17,6 +17,7 @@ function New-WifiIntelligence {
         Radio = $null
         BurstUntil = 0L
         LastProbeAt = 0L
+        SettleUntil = 0L
         LastForecastAt = 0L
     }
 }
@@ -138,12 +139,28 @@ function Get-LatencyPercentile([object[]] $Values) {
     }
 }
 
+function Reset-WifiMeasurementContext($Engine, [long] $Now) {
+    if ($Engine.Incident) { [void] (Complete-WifiEpisode $Engine) }
+    if ($Engine.LastProbeAt -gt $Now) {
+        $Engine.LastProbeAt = 0L
+        $Engine.LastForecastAt = 0L
+        $Engine.Samples.Clear()
+    }
+    $Engine.Radio = $null
+    $Engine.Check = $null
+    $Engine.Trial = $null
+    $Engine.BurstUntil = 0L
+    $Engine.SettleUntil = $Now + 5000
+}
+
 function Update-WifiRadio($Engine, $Radio, [long] $Now) {
     $old = $Engine.Radio
+    if ($old -and (-not $Radio -or $old.Network -ne $Radio.Network)) {
+        Reset-WifiMeasurementContext $Engine $Now
+        $old = $null
+    }
     if ($old -and $Radio) {
-        if ($old.Network -ne $Radio.Network) {
-            $Engine.Trial = $null
-        } elseif ($old.At -ge $Now - 120000 -and ($old.Channel -ne $Radio.Channel -or
+        if ($old.At -ge $Now - 120000 -and ($old.Channel -ne $Radio.Channel -or
                 ($old.Width -and $Radio.Width -and $old.Width -ne $Radio.Width))) {
             $last = 0L
             $before = @(foreach ($entry in $Engine.Samples) {
@@ -180,6 +197,14 @@ function Add-WifiSample($Engine, $Sample, [scriptblock] $ReadEvidence) {
     $now = [long] $Sample.At
     if ($now -le $Engine.LastProbeAt) { return }
     $Engine.LastProbeAt = $now
+    if ($Sample.Scanning -or $now -lt $Engine.SettleUntil) {
+        if ($Engine.PendingSamples.Count -lt 1000) {
+            $raw = $Sample.PSObject.Copy()
+            $raw.Overlap = $(if ($Sample.Scanning) { 'scan' } else { 'transition' })
+            $Engine.PendingSamples.Add($raw)
+        }
+        return
+    }
     $Engine.Samples.Add($Sample)
     if ($Engine.PendingSamples.Count -lt 1000) { $Engine.PendingSamples.Add($Sample) }
     while ($Engine.Samples.Count -and $Engine.Samples[0].At -lt $now - 240000) { $Engine.Samples.RemoveAt(0) }
@@ -269,7 +294,7 @@ function Get-WifiRadioContext([object[]] $Points, [string[]] $Connected, $Previo
     }
     [pscustomobject] @{
         At = $Now; Network = $network; Band = $ownPoint.Band; Signal = $ownPoint.Signal; Channel = $ownPoint.Channel
-        Width = $width
+        Width = $width; Source = $ownPoint.Source
         Signature = $signature; ChangedAt = $changedAt; ObservedAt = $ownPoint.ObservedAt
     }
 }

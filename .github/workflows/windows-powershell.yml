@@ -29,6 +29,9 @@ jobs:
       - name: Neighbor Wi-Fi survey and freshness
         shell: powershell
         run: .\\tests\\NeighborScan.Tests.ps1
+      - name: Neighbor tracking and channel-change evidence
+        shell: powershell
+        run: .\\tests\\NeighborTracking.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

@@ -172,6 +172,11 @@
       </div>
       <p id="neighbor-scan-summary" class="router-ranking">Соседние Wi-Fi-сети: ожидание сканирования.</p>
       <p id="neighbor-evolution" class="router-ranking">История наблюдений: ожидаются завершённые сканирования.</p>
+      <p id="scan-permissions" class="router-ranking">Проверка разрешений Windows.</p>
+      <p id="scan-adapter" class="router-ranking">Проверка Wi-Fi-адаптера.</p>
+      <p id="scan-confidence" class="router-ranking">Проверка свежести сканирования.</p>
+      <p id="scan-interference" class="router-ranking">Оценка силы соседних помех.</p>
+      <p id="neighbor-stability" class="router-ranking">Анализ динамики сигнала соседей.</p>
       <p id="neighbor-changes" class="router-ranking">Новые точки и изменения каналов пока не замечены.</p>
       <p id="router-source-evidence" class="router-ranking">Проверка достоверности источника.</p>
       <div class="router-v22">
@@ -186,6 +191,8 @@
         <div>
           <h3>Эффективность каналов · последние 48 часов (UTC)</h3>
           <div id="router-hourly" class="router-v21-history">Пока нет сохранённых измерений.</div>
+          <h3>Плотность соседних сетей · по часам (UTC)</h3>
+          <div id="neighbor-hourly" class="router-v21-history">Ожидание нескольких снимков SQLite.</div>
         </div>
         <div>
           <h3>Изменения канала · последние 30 дней</h3>

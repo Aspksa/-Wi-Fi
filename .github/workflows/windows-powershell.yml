@@ -32,6 +32,9 @@ jobs:
       - name: Neighbor tracking and channel-change evidence
         shell: powershell
         run: .\\tests\\NeighborTracking.Tests.ps1
+      - name: Wi-Fi v2.5 adaptive scanning and confidence
+        shell: powershell
+        run: .\\tests\\SpectrumV25.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

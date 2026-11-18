@@ -392,6 +392,27 @@ function renderState(next) {
     " · впервые замеченных: " + evolution.new + " · проверяются: " + evolution.tentative +
     " · не замечены повторно: " + evolution.notObserved + ". " + evolution.explanation :
     (evolution.explanation || "Пока недостаточно завершённых сканирований.");
+  const guide = state.permissionGuidance || {};
+  byId("scan-permissions").textContent = guide.status === "scan-restricted" ?
+    "Ограничение Windows: " + guide.reason + " " + (guide.steps || []).join(" ") :
+    "Сканирование: подтверждённых ограничений разрешений не обнаружено.";
+  const adapter = state.adapterSummary || {};
+  byId("scan-adapter").textContent = "Wi-Fi-адаптер: " + (adapter.name || "не определён") +
+    " · " + (adapter.description || "модель не определена") +
+    " · драйвер: " + (adapter.driver === "not-verified" ? "не подтверждён" : adapter.driver || "неизвестно") +
+    " · поддерживаемые диапазоны: не подтверждены";
+  byId("scan-confidence").textContent = "Достоверность снимка: " + ({
+    observed:"завершённый Windows WLAN", "cached-or-incomplete":"кэш / неполный скан",
+    "unverified-cache":"netsh, свежесть кэша неизвестна",
+    "stale-or-missing":"снимок устарел или отсутствует",unverified:"не подтверждена"
+  }[state.scanConfidence] || "ожидание");
+  byId("scan-interference").textContent = "Соседние сигналы (оценка, не загрузка эфира): " +
+    (state.interference || []).map(b => b.band + " ГГц: " +
+      (b.strongest || []).map(p => "канал " + p.channel + " / " + p.signal + "%").join(", ")).join(" · ");
+  byId("neighbor-stability").textContent = "Динамика сети: нестабильных точек " +
+    (evolution.volatile || 0) + " · " +
+    (evolution.strongest || []).map(p => (p.name || "Скрытая сеть") +
+      " (средний сигнал " + p.meanSignal + "%, " + p.sightings + " наблюдений)").join("; ");
   const changeLabels = { "new-observation": "новая точка", "channel-shift": "смена наблюдаемого канала", "not-observed": "отсутствует в двух снимках" };
   byId("neighbor-changes").textContent = evolution.changes?.length ?
     "Изменения за последний час: " + evolution.changes.map(e =>
@@ -403,8 +424,10 @@ function renderState(next) {
   byId("router-safety").textContent = state.automation?.reason || "Автоматические изменения отключены.";
   for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {
     const guard = state.recommendationGuards?.[band];
+    const confidence = state.recommendationConfidence?.[band];
     byId("router-guard-" + suffix).textContent = band + " ГГц · " +
-      (guard?.label || "Ожидание") + ": " + (guard?.reasons?.join(" · ") || "Ожидание измерений");
+      (confidence?.eligible ? "Кандидат для ручной проверки" : "Только наблюдение") + ": " +
+      (guard?.reasons?.join(" · ") || confidence?.reason || "Ожидание измерений");
   }
   const repeated = state.repeatedIssues || [];
   byId("router-patterns").textContent = repeated.length ?
@@ -422,6 +445,15 @@ function renderState(next) {
     r.samples + " проб · " + r.badPercent + "% сбоев · " + r.lossPercent + "% потерь · " +
     (r.averageMs == null ? "нет задержки" : r.averageMs + " мс")).join("\n") :
     "Пока недостаточно сохранённых измерений. Результат основан на SQLite.";
+  const density = state.hourlyNeighbors || [];
+  byId("neighbor-hourly").textContent = density.length ? density.slice(0,16).map(r =>
+    r.hourUtc + " UTC · " + r.band + " ГГц · " + r.scans +
+    " сканов · соседей в среднем " + r.averageNeighbors +
+    " (макс. " + r.maxNeighbors + ")" +
+    (r.localBadPercent == null ? " · локальных проб недостаточно" :
+      " · локальных плохих проб " + r.localBadPercent + "%") +
+    " · причинная связь не установлена").join("\\n") :
+    "Нужны как минимум два сохранённых скана за час. Данные из SQLite.";
   const trials = state.recentTrials || [];
   byId("router-trials").textContent = trials.length ? trials.map(r =>
     new Date(r.at).toLocaleString("ru-RU") + " · " + r.old + " → " + r.new +

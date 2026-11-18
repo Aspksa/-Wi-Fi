@@ -30,6 +30,8 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
     foreach ($key in @($current.Keys | Sort-Object)) {
         $point=$current[$key]
         $previous=$Tracker.Seen[$key]
+        $observed=$(if ($point.ObservedAt) {[long]$point.ObservedAt} else {$ScanAt})
+        if ($previous -and $observed -le [long]$previous.LastObservation) { continue }
         if ($previous) {
             if ([int]$previous.Channel -ne [int]$point.Channel) {
                 $Tracker.Changes=@([pscustomobject]@{
@@ -38,9 +40,20 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
                     name=[string]$point.SSID
                 })+@($Tracker.Changes | Select-Object -First 19)
             }
+            $signalDelta=[Math]::Abs([int]$previous.Signal - [int]$point.Signal)
+            if ($signalDelta -ge 25) {
+                $Tracker.Changes=@([pscustomobject]@{
+                    at=$ScanAt;type='signal-jump';band=[string]$point.Band
+                    from=[int]$previous.Signal;to=[int]$point.Signal;name=[string]$point.SSID
+                })+@($Tracker.Changes | Select-Object -First 19)
+                $previous.SignalJumps++
+            }
+            if ([int]$previous.Channel -ne [int]$point.Channel) { $previous.ChannelChanges++ }
+            $previous.SignalTotal += [int]$point.Signal
             $previous.Channel=[int]$point.Channel
             $previous.Signal=[int]$point.Signal
             $previous.LastSeen=$ScanAt
+            $previous.LastObservation=$observed
             $previous.Sightings++
             $previous.Misses=0
             $previous.Present=$true
@@ -49,7 +62,8 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
             $Tracker.Seen[$key]=[pscustomobject]@{
                 Key=$key;Name=[string]$point.SSID;Band=[string]$point.Band
                 Channel=[int]$point.Channel;Signal=[int]$point.Signal
-                FirstSeen=$ScanAt;LastSeen=$ScanAt;Sightings=1;Misses=0;Present=$true
+                FirstSeen=$ScanAt;LastSeen=$ScanAt;LastObservation=$observed;Sightings=1;Misses=0;Present=$true
+                SignalTotal=[int]$point.Signal;SignalJumps=0;ChannelChanges=0
             }
             $Tracker.Changes=@([pscustomobject]@{
                 at=$ScanAt;type='new-observation';band=[string]$point.Band
@@ -94,7 +108,16 @@ function Get-WifiNeighborEvolution($Tracker,[long]$Now) {
     [pscustomobject]@{
         completeSurveys=[int]$Tracker.CompletedSurveys
         stable=$stable;new=$new;tentative=$tentative;notObserved=$missing
-        status='observed';changes=@($Tracker.Changes | Where-Object {$Now - $_.at -ge 0 -and $Now - $_.at -le 3600000} | Select-Object -First 8)
+        status='observed'
+        volatile=@($recent | Where-Object {$_.SignalJumps -ge 2 -or $_.ChannelChanges -ge 2}).Count
+        strongest=@($recent | Where-Object {$_.Present -and $_.Sightings -ge 2} |
+            Sort-Object Signal -Descending | Select-Object -First 6 |
+            ForEach-Object {[pscustomobject]@{
+                name=$_.Name; band=$_.Band;channel=$_.Channel
+                signal=$_.Signal;meanSignal=[Math]::Round($_.SignalTotal/$_.Sightings,1)
+                sightings=$_.Sightings;channelChanges=$_.ChannelChanges;signalJumps=$_.SignalJumps
+            }})
+        changes=@($Tracker.Changes | Where-Object {$Now - $_.at -ge 0 -and $Now - $_.at -le 3600000} | Select-Object -First 8)
         explanation='Устойчивые точки замечены в 3+ завершённых сканированиях. Отсутствие в двух снимках не доказывает отключение сети.'
     }
 }

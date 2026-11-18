@@ -23,6 +23,9 @@ jobs:
       - name: V2.1 trend, router request and SQLite history
         shell: powershell
         run: .\\tests\\RouterInsights.Tests.ps1
+      - name: Wi-Fi v2.2 recommendation guards and safe RE3L policy
+        shell: powershell
+        run: .\\tests\\RouterV22.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

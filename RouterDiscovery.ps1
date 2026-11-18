@@ -52,76 +52,19 @@ function Get-WifiRouterAccessState([int] $Code, [string] $Page) {
     'open-page'
 }
 
+# Universal gateway monitoring. No firmware identification, login or API probing.
 function Get-WifiRouterInfo($Diagnostics) {
     $address = Get-WifiRouterAddress $Diagnostics
-    $result = [ordered] @{
-        address = [string] $address
-        status = 'no-wifi-gateway'
-        model = ''
-        firmware = ''
-        management = $false
-        authentication = 'unknown'
-        scheme = ''
-        httpStatus = 0
-        spectrum = 'unverified'
-        capabilities = Get-WifiRouterCapabilityHints ''
-        explanation = 'Шлюз Wi-Fi не определён.'
+    $reachable = $false
+    if ($Diagnostics -and $Diagnostics.Router) {
+        $probe = $Diagnostics.Router
+        $reachable = [bool] ($probe.Tested -and $probe.Lost -lt 3)
     }
-    if (-not $address) { return [pscustomobject] $result }
-    $result.status = 'unreachable'
-    $result.explanation = 'Локальная панель роутера не ответила по HTTP или HTTPS.'
-    # Only the currently selected private IPv4 Wi-Fi gateway, only GET /.
-    # Never follow redirects or accept a different certificate authority silently.
-    foreach ($scheme in @('http','https')) {
-        $response = $null
-        try {
-            $request = [Net.HttpWebRequest] [Net.WebRequest]::Create(('{0}://{1}/' -f $scheme,$address))
-            $request.Method = 'GET'
-            $request.Timeout = 1200
-            $request.ReadWriteTimeout = 1200
-            $request.AllowAutoRedirect = $false
-            $request.Proxy = $null
-            $request.UserAgent = 'Wi-Fi local read-only discovery'
-            try {
-                $response = $request.GetResponse()
-            } catch [Net.WebException] {
-                if ($_.Exception.Response) { $response = $_.Exception.Response }
-                else { continue }
-            }
-            if (-not $response) { continue }
-            $status = [int] $response.StatusCode
-            if ($status -notin @(200,301,302,303,307,308,401,403)) { continue }
-            $result.management = $true
-            $result.scheme = $scheme
-            $result.httpStatus = $status
-            $result.status = 'web-detected'
-            $page = ''
-            if ($status -eq 200 -and [string] $response.ContentType -match 'text/html') {
-                $reader = New-Object IO.StreamReader($response.GetResponseStream())
-                try {
-                    $chars = New-Object char[] 65536
-                    $count = $reader.Read($chars,0,$chars.Length)
-                    if ($count -gt 0) { $page = -join $chars[0..($count-1)] }
-                } finally { $reader.Dispose() }
-            }
-            $result.authentication = Get-WifiRouterAccessState $status $page
-            if ($page) {
-                $identity = Get-WifiRouterIdentity $page
-                $result.model = $identity.Model
-                $result.firmware = $identity.Firmware
-                $result.capabilities = Get-WifiRouterCapabilityHints $page
-            }
-            $result.explanation = switch ($result.authentication) {
-                'login-required' { 'Панель требует авторизацию. Пароль и сеанс не запрашиваются программой.' }
-                'redirect-unverified' { 'Веб-панель перенаправляет на другую страницу. Автопереход отключён.' }
-                default { 'Панель доступна. Внутренний API конкретной прошивки не подтверждён.' }
-            }
-            break
-        } catch {
-            # Discovery must never interrupt Wi-Fi monitoring.
-        } finally {
-            if ($response) { $response.Dispose() }
-        }
+    [pscustomobject] @{
+        address=[string] $address
+        status=$(if (-not $address) {'no-wifi-gateway'} elseif ($reachable) {'reachable'} else {'unknown'})
+        reachable=$reachable
+        management=$false
+        explanation=$(if (-not $address) {'Шлюз Wi-Fi не определён.'} elseif ($reachable) {'Локальный шлюз отвечает на контрольные запросы.'} else {'Доступность шлюза ещё не подтверждена.'})
     }
-    [pscustomobject] $result
 }

@@ -353,16 +353,10 @@ function renderState(next) {
   })[state.link] || "Ожидание диагностики.";
   const router = state.router || {};
   const telemetry = state.routerTelemetry;
-  byId("router-source").textContent = telemetry ? "Импорт RE3L" : "Windows / шлюз";
-  byId("router-identity").textContent = "Адрес: " + (router.address || "не определён") +
-    " · Модель: " + (router.model || "не подтверждена") + " · Прошивка: " + (router.firmware || "неизвестна") +
-    " · Панель: " + (router.scheme ? router.scheme.toUpperCase() : "недоступна") +
-    " · Авторизация: " + ({ "login-required": "требуется", "open-page": "открытая страница", "redirect-unverified": "редирект" }[router.authentication] || "неизвестно");
-  const cap = router.capabilities || {};
-  const hint = key => cap[key] === "interface-hint" ? "упоминание на странице (не проверено)" : "не подтверждено";
-  byId("router-capabilities").textContent = (router.explanation || "Доступность функций API пока неизвестна.") +
-    " · Соседние сети: " + hint("scan") + " · Настройки каналов: " + hint("channel") +
-    " · Эфирное время: " + hint("radio") + " · API изменения и отката: не подтверждено.";
+  byId("router-source").textContent = state.source || "Windows / шлюз";
+  byId("router-identity").textContent = "Шлюз Wi-Fi: " + (router.address || "не определён") +
+    " · " + (router.reachable ? "отвечает на контрольные запросы" : "доступность не подтверждена");
+  byId("router-capabilities").textContent = "Сканирование: Windows WLAN / netsh. Роутер не требует специальной прошивки или API.";
   const airtime = telemetry?.airtime || [];
   byId("router-airtime").textContent = airtime.length ?
     "Показатели из импорта (не проверены): " + airtime.map(item => item.band + " ГГц, канал " + item.channel + " · " + item.busyPercent + "%").join("; ") :
@@ -384,9 +378,18 @@ function renderState(next) {
     return [band + " ГГц: " + (top.join("; ") || "нет подтверждённых каналов")];
   });
   byId("router-ranking").textContent = ranking.join(" · ");
-  const capture = state.apiCapture || {};
-  byId("router-api").textContent = "API RE3L: " + (capture.warning || "Нет данных о запросах.") +
-    (capture.readEndpoints ? " Найдено подходящих записей: " + capture.readEndpoints + ". Никакие запросы не выполняются." : "");
+  byId("router-source-evidence").textContent = state.sourceEvidence?.label || "Источник радиоэфира не определён.";
+  byId("router-safety").textContent = state.automation?.reason || "Автоматические изменения отключены.";
+  for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {
+    const guard = state.recommendationGuards?.[band];
+    byId("router-guard-" + suffix).textContent = band + " ГГц · " +
+      (guard?.label || "Ожидание") + ": " + (guard?.reasons?.join(" · ") || "Ожидание измерений");
+  }
+  const repeated = state.repeatedIssues || [];
+  byId("router-patterns").textContent = repeated.length ?
+    "Повторения по часам UTC: " + repeated.map(p => p.band + " ГГц / " + p.channel +
+      " · " + p.hourUtc + ":00 · " + p.days + " дня").join("; ") :
+    "Повторяющихся проблем по одинаковым часам разных дней не выявлено или недостаточно данных.";
   const trend = state.trend || {};
   byId("router-trend").textContent = "Качество связи: " +
     ({ worsening: "рост сбоев", improving: "снижение сбоев", "stable-or-unclear": "существенного изменения не выявлено",

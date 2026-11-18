@@ -87,7 +87,7 @@ try{
     $ng=Read-WifiPcapng $ngPath
     Assert ($ng.format -eq 'pcapng' -and $ng.networks.Count -eq 1 -and $ng.networks[0].hiddenSsid) 'PCAPNG synthetic beacon imported'
     $bytes=[IO.File]::ReadAllBytes($ngPath)
-    $bytes[$bytes.Length-1]=0
+    $bytes[$bytes.Length-4]=0
     [IO.File]::WriteAllBytes($ngPath,$bytes)
     $invalid=$false
     try {[void](Read-WifiPcapng $ngPath)} catch {$invalid=$true}

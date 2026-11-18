@@ -90,6 +90,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
     [pscustomobject] @{
         now = $Now; scanAt = $Session.ScanAt; scanning = [bool] $Session.Worker
         source = $Session.Source; issue = $Session.Issue; storage = $Session.Storage
+        neighborScan = Get-WifiNeighborSummary @($Session.Points) ([string]$Session.Source) ([long]$Session.ScanAt) $Now ([bool]$Session.ScanBlocked)
         health = Get-WebHealth $Session $Now
         router = $Session.Router
         routerTelemetry = $(if ($Session.RouterTelemetry) { [pscustomobject] @{ source = $Session.RouterTelemetry.source; capturedAt = $Session.RouterTelemetry.capturedAt; airtime = @($Session.RouterTelemetry.airtime); verifiedLive = $false } })

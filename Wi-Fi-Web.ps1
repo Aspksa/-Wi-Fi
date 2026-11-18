@@ -408,6 +408,7 @@ try {
                         $run.Research=New-WifiResearchMemory
                         $run.Plans.Clear();$run.Streak.Clear()
                         $run.Spectrum=@()
+                        $run.Server.SetSpectrum('[]')
                         Start-WebScan $run $now $true
                     }
                 }
@@ -495,7 +496,7 @@ try {
             Save-WebMeasurements $run $now
             if($run.Database -and $now -ge $run.NextBackup){
                 $run.LastBackup=Save-WifiVerifiedBackup $run.Database $run.BackupFolder $now
-                $run.NextBackup=$now+18000000
+                $run.NextBackup=$now+$(if($run.LastBackup.status -eq 'verified'){18000000}else{900000})
             }
             if($now -ge $run.NextReport){
                 try{

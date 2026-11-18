@@ -384,8 +384,21 @@ function renderState(next) {
     return [band + " ГГц: " + (top.join("; ") || "нет подтверждённых каналов")];
   });
   byId("router-ranking").textContent = ranking.join(" · ");
+  byId("router-source-evidence").textContent = state.sourceEvidence?.label || "Источник радиоэфира не определён.";
+  byId("router-safety").textContent = state.automation?.reason || "Автоматические изменения отключены.";
+  for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {
+    const guard = state.recommendationGuards?.[band];
+    byId("router-guard-" + suffix).textContent = band + " ГГц · " +
+      (guard?.label || "Ожидание") + ": " + (guard?.reasons?.join(" · ") || "Ожидание измерений");
+  }
+  const repeated = state.repeatedIssues || [];
+  byId("router-patterns").textContent = repeated.length ?
+    "Повторения по часам UTC: " + repeated.map(p => p.band + " ГГц / " + p.channel +
+      " · " + p.hourUtc + ":00 · " + p.days + " дня").join("; ") :
+    "Повторяющихся проблем по одинаковым часам разных дней не выявлено или недостаточно данных.";
   const capture = state.apiCapture || {};
   byId("router-api").textContent = "API RE3L: " + (capture.warning || "Нет данных о запросах.") +
+    " · " + (state.apiAssessment?.reason || "API чтения не подтверждён.") +
     (capture.readEndpoints ? " Найдено подходящих записей: " + capture.readEndpoints + ". Никакие запросы не выполняются." : "");
   const trend = state.trend || {};
   byId("router-trend").textContent = "Качество связи: " +

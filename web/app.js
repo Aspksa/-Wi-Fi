@@ -6,6 +6,7 @@ const stopped = byId("stop-tracking");
 const sources = [
   { key: "2.4", suffix: "24", label: "2,4 ГГц", min: 2399, max: 2497, channels: [1, 3, 5, 7, 9, 11, 13] },
   { key: "5", suffix: "5", label: "5 ГГц", min: 5145, max: 5910, channels: [36, 48, 64, 100, 116, 132, 149, 161] },
+  { key: "6", suffix: "6", label: "6 ГГц", min: 5925, max: 7130, channels: [1, 33, 65, 97, 129, 161, 193, 225] },
 ];
 const palette = { grid: "#31372f", text: "#9ba495", gold: "#f0bd62", blue: "#8db9c5", glow: "#ec8848", loss: "#f07c70", trail: "#c2a1ed" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");
@@ -198,6 +199,9 @@ function mapPoints() {
 function pointCaption(point) {
   return point.name + " · канал " + point.channel + " · " + point.frequency + " МГц · " + point.signalText +
     " · " + (point.measured ? "" : "≈") + point.width + " МГц" +
+    (point.generation && point.generation !== "unverified" ? " · " + point.generation : "") +
+    (point.rsnVersion != null ? " · RSN v" + point.rsnVersion : "") +
+    (point.unknownIeCount ? " · других IE " + point.unknownIeCount : "") +
     (point.stale ? " · " + (point.observedAt ? "видели в " + new Date(point.observedAt).toLocaleTimeString("ru-RU") : "старый замер") : "");
 }
 
@@ -418,6 +422,51 @@ function renderState(next) {
   byId("scan-permissions").textContent = guide.status === "scan-restricted" ?
     "Ограничение Windows: " + guide.reason + " " + (guide.steps || []).join(" ") :
     "Сканирование: подтверждённых ограничений разрешений не обнаружено.";
+  const picker = byId("wifi-adapter-select");
+  const options = state.adapters || [];
+  const optionSignature = JSON.stringify(options.map(a => [a.id,a.name]));
+  if (picker.dataset.signature !== optionSignature) {
+    picker.dataset.signature = optionSignature;
+    picker.replaceChildren(new Option("Автоматический выбор", ""));
+    for (const a of options) picker.add(new Option((a.name || "Wi-Fi") + " · " + (a.status || "неизвестно"), a.id));
+  }
+  if (document.activeElement !== picker) picker.value = state.selectedAdapter || "";
+  const recovery = state.recovery || {};
+  byId("scan-recovery").textContent = "Автовосстановление: " +
+    (recovery.category === "unknown" ? "причина не определена" : recovery.category) +
+    " · последовательных ошибок " + (recovery.failures || 0) +
+    " · при блокировке повтор активного сканирования не чаще раза в 120 секунд.";
+  byId("scan-bands").textContent = "Наблюдаемые диапазоны: " +
+    (state.hardwareBands || []).map(b => b.band + " ГГц: " + b.observed + " точек").join(" · ") +
+    ". Отсутствие точек не доказывает отсутствие аппаратной поддержки.";
+  const startup = state.startupChecks || {};
+  byId("scan-startup").textContent = "Самотест: код " + (startup.codePresent ? "OK" : "неизвестно") +
+    " · интерфейс " + (startup.webFilesPresent ? "OK" : "нет") +
+    " · SQLite " + (startup.sqliteIntegrity ? "OK" : "недоступна") +
+    " · адаптеров " + (startup.wifiAdapters ?? "—");
+  const perf = state.performance || {};
+  byId("scan-performance").textContent = "Процесс: память " + (perf.processWorkingSetMb ?? "—") +
+    " МБ · CPU накопленно " + (perf.cpuSeconds ?? "—") + " сек" +
+    " · скан " + (perf.scanElapsedMs ?? 0) + " мс";
+  const research = state.researchConfidence || {};
+  byId("scan-memory").textContent = "Долговременная память: " +
+    (state.longMemory?.length || 0) + " сохранённых суточных рядов · оценка " +
+    (research.level || "низкая") + " · независимых сканов " + (research.independentScans ?? 0);
+  byId("scan-backup").textContent = "Резервирование SQLite: " +
+    (state.backup?.status || "ожидание") + (state.backup?.note ? " · " + state.backup.note : "") +
+    " · локальный отчёт " + (state.report?.at ? new Date(state.report.at).toLocaleString("ru-RU") : "ожидание");
+  byId("scan-investigation").textContent = "Расследования: " + (research.incidents?.length || 0) +
+    " · аномалий BSSID " + (research.anomalies?.length || 0) +
+    " · источник " + (research.source || "не подтверждён") +
+    " · выводы требуют независимых проб.";
+  byId("scan-ssid-variation").textContent = state.ssidVariations?.length ?
+    "Одинаковые SSID с разными объявлениями (не доказательство подмены): " +
+    state.ssidVariations.map(v => v.ssid + " · " + v.accessPoints + " BSSID").join("; ") :
+    "Изменений объявленных параметров под одним SSID не обнаружено или данных недостаточно.";
+  byId("scan-alerts").textContent = research.alerts?.length ?
+    "Диагностика: " + research.alerts.slice(0,3).map(a => a.kind + " · " +
+      new Date(a.at).toLocaleTimeString("ru-RU")).join("; ") :
+    "Уведомления: значимых событий пока нет.";
   const adapter = state.adapterSummary || {};
   byId("scan-adapter").textContent = "Wi-Fi-адаптер: " + (adapter.name || "не определён") +
     " · " + (adapter.description || "модель не определена") +
@@ -434,7 +483,7 @@ function renderState(next) {
   byId("neighbor-stability").textContent = "Динамика сети: нестабильных точек " +
     (evolution.volatile || 0) + " · " +
     (evolution.strongest || []).map(p => (p.name || "Скрытая сеть") +
-      " (средний сигнал " + p.meanSignal + "%, " + p.sightings + " наблюдений)").join("; ");
+      " (средний сигнал " + p.meanSignal + "%, RSSI " + (p.averageRssi ?? "—") + " дБм, " + p.sightings + " наблюдений)").join("; ");
   const changeLabels = { "new-observation": "новая точка", "channel-shift": "смена наблюдаемого канала", "not-observed": "отсутствует в двух снимках" };
   byId("neighbor-changes").textContent = evolution.changes?.length ?
     "Изменения за последний час: " + evolution.changes.map(e =>
@@ -970,6 +1019,7 @@ byId("phone-import").addEventListener("submit", (event) => {
 });
 
 byId("refresh").addEventListener("click", () => command("refresh"));
+byId("wifi-adapter-select").addEventListener("change", event => command("adapter", event.target.value));
 byId("home-form").addEventListener("submit", (event) => {
   event.preventDefault();
   command("home", homeField.value);

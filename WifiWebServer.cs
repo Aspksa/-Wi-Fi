@@ -169,7 +169,7 @@ namespace WiFi
             {
                 int query = target.IndexOf('?');
                 string path = query < 0 ? target : target.Substring(0, query);
-                if ((path == "/api/refresh" || path == "/api/home" || path == "/api/track") && commands.Count < 32)
+                if ((path == "/api/refresh" || path == "/api/home" || path == "/api/track" || path == "/api/adapter") && commands.Count < 32)
                 {
                     string value = query < 0 ? String.Empty : Uri.UnescapeDataString(target.Substring(query + 1));
                     if (value.Length <= 64)

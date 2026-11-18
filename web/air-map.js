@@ -156,7 +156,7 @@ const AirMap = (() => {
     ctx.textAlign = "center";
     let labelX = -40;
     for (const channel of band.channels) {
-      const mhz = (band.key === "5" ? 5000 : 2407) + 5 * channel;
+      const mhz = (band.key === "6" ? 5950 : band.key === "5" ? 5000 : 2407) + 5 * channel;
       const pos = project((mhz - band.min) / (band.max - band.min), 0);
       if (pos.x - labelX < 21) continue;
       ctx.fillText(String(channel), pos.x, pos.y + 13);

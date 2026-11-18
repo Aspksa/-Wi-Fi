@@ -50,6 +50,14 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
             }
             if ([int]$previous.Channel -ne [int]$point.Channel) { $previous.ChannelChanges++ }
             $previous.SignalTotal += [int]$point.Signal
+            $previous.MinSignal=[Math]::Min([int]$previous.MinSignal,[int]$point.Signal)
+            $previous.MaxSignal=[Math]::Max([int]$previous.MaxSignal,[int]$point.Signal)
+            if ($null -ne $point.Rssi) {
+                $previous.RssiTotal += [int]$point.Rssi
+                $previous.RssiSamples++
+                $previous.MinRssi=[Math]::Min([int]$previous.MinRssi,[int]$point.Rssi)
+                $previous.MaxRssi=[Math]::Max([int]$previous.MaxRssi,[int]$point.Rssi)
+            }
             $previous.Channel=[int]$point.Channel
             $previous.Signal=[int]$point.Signal
             $previous.LastSeen=$ScanAt
@@ -64,6 +72,11 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
                 Channel=[int]$point.Channel;Signal=[int]$point.Signal
                 FirstSeen=$ScanAt;LastSeen=$ScanAt;LastObservation=$observed;Sightings=1;Misses=0;Present=$true
                 SignalTotal=[int]$point.Signal;SignalJumps=0;ChannelChanges=0
+                MinSignal=[int]$point.Signal;MaxSignal=[int]$point.Signal
+                RssiTotal=$(if($null -ne $point.Rssi){[int]$point.Rssi}else{0})
+                RssiSamples=$(if($null -ne $point.Rssi){1}else{0})
+                MinRssi=$(if($null -ne $point.Rssi){[int]$point.Rssi}else{0})
+                MaxRssi=$(if($null -ne $point.Rssi){[int]$point.Rssi}else{0})
             }
             $Tracker.Changes=@([pscustomobject]@{
                 at=$ScanAt;type='new-observation';band=[string]$point.Band
@@ -116,6 +129,10 @@ function Get-WifiNeighborEvolution($Tracker,[long]$Now) {
                 name=$_.Name; band=$_.Band;channel=$_.Channel
                 signal=$_.Signal;meanSignal=[Math]::Round($_.SignalTotal/$_.Sightings,1)
                 sightings=$_.Sightings;channelChanges=$_.ChannelChanges;signalJumps=$_.SignalJumps
+                minSignal=$_.MinSignal;maxSignal=$_.MaxSignal
+                averageRssi=$(if($_.RssiSamples -gt 0){[Math]::Round($_.RssiTotal/$_.RssiSamples,1)}else{$null})
+                minRssi=$(if($_.RssiSamples -gt 0){$_.MinRssi}else{$null})
+                maxRssi=$(if($_.RssiSamples -gt 0){$_.MaxRssi}else{$null})
             }})
         changes=@($Tracker.Changes | Where-Object {$Now - $_.at -ge 0 -and $Now - $_.at -le 3600000} | Select-Object -First 8)
         explanation='Устойчивые точки замечены в 3+ завершённых сканированиях. Отсутствие в двух снимках не доказывает отключение сети.'

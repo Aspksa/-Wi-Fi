@@ -38,6 +38,9 @@ jobs:
       - name: Wi-Fi v3 Beacon, roaming and offline PCAP
         shell: powershell
         run: .\\tests\\WifiV3.Tests.ps1
+      - name: Wi-Fi v3.1 recovery, long memory and investigations
+        shell: powershell
+        run: .\\tests\\WifiV31.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

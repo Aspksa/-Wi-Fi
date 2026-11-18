@@ -1,14 +1,20 @@
-﻿function Start-WifiScanJob([bool] $Active, [bool] $DiagnosticsOnly = $false) {
+﻿function Start-WifiScanJob([bool] $Active, [bool] $DiagnosticsOnly = $false, [string]$AdapterId = '') {
     $worker = (Join-Path $PSScriptRoot 'ScanWorker.ps1').Replace("'", "''")
     $monitor = (Join-Path $PSScriptRoot 'Monitor.ps1').Replace("'", "''")
     $native = (Join-Path $PSScriptRoot 'WifiNativeScan.cs').Replace("'", "''")
     $activeFlag = '$' + $Active.ToString().ToLowerInvariant()
     $diagnosticsFlag = '$' + $DiagnosticsOnly.ToString().ToLowerInvariant()
+    if ($AdapterId) {
+        $parsed = [guid]::Empty
+        if (-not [guid]::TryParse($AdapterId,[ref]$parsed)) { throw 'Недопустимый идентификатор Wi-Fi адаптера.' }
+        $AdapterId = $parsed.ToString()
+    }
+    $safeAdapter = $AdapterId.Replace("'", "''")
     $command = @"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 `$ErrorActionPreference = 'Stop'
 try {
-    `$result = & '$worker' '$monitor' '$native' $activeFlag $diagnosticsFlag
+    `$result = & '$worker' '$monitor' '$native' $activeFlag $diagnosticsFlag '$safeAdapter'
     if (`$result.Diagnostics.Gateway) { `$result.Diagnostics.Gateway = [string] `$result.Diagnostics.Gateway }
     ConvertTo-Json -InputObject @{ Result = `$result } -Depth 8 -Compress
 } catch {

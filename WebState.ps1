@@ -23,6 +23,10 @@ function ConvertTo-WebPoint($Point, $Tracked) {
         ehtAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Eht)
         p2pAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.WifiDirect)
         rsnAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Rsn)
+        rsnVersion = $(if($Point.Capabilities){$Point.Capabilities.RsnVersion})
+        unknownIeCount = $(if($Point.Capabilities){[int]$Point.Capabilities.UnknownElements}else{0})
+        heOperation = [bool]($Point.Capabilities -and $Point.Capabilities.HeOperation)
+        ehtOperation = [bool]($Point.Capabilities -and $Point.Capabilities.EhtOperation)
         own = [bool] $Point.Own
         stale = $Point.Fresh -eq $false
         tracked = $Tracked -and $Tracked.BSSID -eq $Point.BSSID -and $Tracked.Band -eq $Point.Band
@@ -106,6 +110,21 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         captureSupport = $Session.CaptureSupport
         directInventory = $Session.DirectInventory
         wlanEvents = $Session.WlanEvents
+        adapters = @($Session.AdapterInventory)
+        selectedAdapter = [string]$Session.SelectedAdapter
+        recovery = [pscustomobject]@{
+            failures=$(if($Session.Recovery){[int]$Session.Recovery.Failures}else{0})
+            events=@($(if($Session.Recovery){$Session.Recovery.Events}))
+            category=Get-WifiFailureCategory ([string]$Session.Issue) ([bool]$Session.ScanBlocked) $false
+        }
+        startupChecks = $Session.StartupChecks
+        hardwareBands = @(Get-WifiBandEvidence @($Session.Points))
+        performance = Get-WifiPerformanceSnapshot ([long]$Session.ScanStartedAt) $Now ([int]$Session.ScanFailures)
+        ssidVariations = @(Get-WifiSsidVariations @($Session.Points))
+        researchConfidence = Get-WifiResearchConfidence $Session.Research ([int]$Session.NeighborTracker.CompletedSurveys) ([string]$Session.Source) ($Now-[long]$Session.ScanAt)
+        longMemory = @($Session.LongHistory | Select-Object -First 30)
+        backup = $Session.LastBackup
+        report = $Session.LastReport
         researchV3 = Get-WifiV3Hypotheses (Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)) (Get-WifiNeighborEvolution $Session.NeighborTracker $Now) @($Session.HourlyNeighbors)
         scanConfidence = Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count
         permissionGuidance = Get-WifiPermissionGuidance ([bool]$Session.ScanBlocked) ([string]$Session.Issue)
@@ -164,7 +183,7 @@ function Set-WebTrackedPoint($Session, [string] $Value, [datetime] $At) {
 function Get-SpectrumFrame([long] $At, [object[]] $Points) {
     $fresh = @($Points | Where-Object { $_.Fresh -ne $false })
     if (-not $fresh.Count) { return }
-    $timestamps = @(foreach ($band in @('2.4', '5')) {
+    $timestamps = @(foreach ($band in @('2.4', '5', '6')) {
         $recent = $fresh | Where-Object { $_.Band -eq $band -and $_.ObservedAt } |
             Sort-Object ObservedAt -Descending | Select-Object -First 1
         if ($recent) { "$band/$($recent.ObservedAt)" }

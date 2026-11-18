@@ -94,7 +94,7 @@ function renderHeat() {
 }
 
 function renderLists() {
-  const pointSignature = JSON.stringify(state.points);
+  const pointSignature = state.points.length ? JSON.stringify(state.points) : String(state.scanning);
   if (pointSignature !== renderedPoints) {
     renderedPoints = pointSignature;
     const rows = [...state.points].sort((a, b) => Number(b.own) - Number(a.own) || Number(a.stale) - Number(b.stale) || b.signal - a.signal).map((point) => {

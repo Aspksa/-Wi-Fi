@@ -283,11 +283,16 @@ const AirMap = (() => {
     }
 
     function snapshotFor(at) {
-      const valid = snapshots.filter((item) => Number.isFinite(item.at));
-      const before = valid.filter((item) => item.at <= at).at(-1);
-      if (before && at - before.at <= ageLimit) return before;
-      const after = valid.find((item) => item.at > at && item.at - at <= ageLimit);
-      return after || before;
+      let nearest = null;
+      let distance = Infinity;
+      for (const item of snapshots) {
+        const delta = Math.abs(item.at - at);
+        if (Number.isFinite(item.at) && delta <= ageLimit && delta < distance) {
+          nearest = item;
+          distance = delta;
+        }
+      }
+      return nearest;
     }
 
     function incidentList() {
@@ -477,7 +482,7 @@ const AirMap = (() => {
       const stage = age >= stop ? "" : age < (motion.matches ? 0 : 1450) ? "locate" :
         age > 5100 && confirmed ? "suggest" : "inspect";
       const lookupKey = stage === "locate" ? null : match?.key || null;
-      if (stage !== storyStage || lookupKey !== storyMatchKey) {
+      if (!stage || stage !== storyStage || lookupKey !== storyMatchKey) {
         storyStage = stage;
         storyMatchKey = lookupKey;
         writeStory(stage, stage ? episode : null, stage ? match : null);
@@ -490,7 +495,7 @@ const AirMap = (() => {
     }
 
     function showControls(selected, points) {
-      const view = selected || liveFrame();
+      const view = selected || liveFrame() || snapshots.at(-1);
       for (const key of ["A", "B"]) {
         const button = el("air-set-" + key.toLowerCase());
         button.dataset.frame = view?.key || "";
@@ -690,7 +695,7 @@ const AirMap = (() => {
       });
       for (const key of ["A", "B"]) {
         el("air-set-" + key.toLowerCase()).addEventListener("click", () => {
-          const selected = getSelected() || liveFrame();
+          const selected = getSelected() || liveFrame() || snapshots.at(-1);
           if (!selected) return;
           cancel(true);
           compare[key] = selected;

@@ -34,4 +34,7 @@ foreach ($entry in $samples) {
 $evidence = Get-WifiLatencyEvidence $samples $network $now
 Assert ($evidence.Classification -eq 'external') 'External-only failures must not be blamed on Wi-Fi'
 Assert ((Get-WifiLatencyEvidence @($samples[0..9]) $network $now).Classification -eq 'insufficient') 'Require sufficient samples'
+$gateway = Get-WifiRouterInfo ([pscustomobject] @{Gateway='192.168.1.1';Router=[pscustomobject]@{Tested=$true;Lost=0}})
+Assert ($gateway.reachable -and $gateway.address -eq '192.168.1.1') 'Universal local gateway diagnostics'
+Assert (-not $gateway.management) 'No web admin probing'
 'Router discovery and latency evidence tests passed'

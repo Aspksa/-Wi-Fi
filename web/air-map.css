@@ -131,3 +131,76 @@
   .spectrum-plot { height: 161px; }
   .waterfall canvas { height: 65px; }
 }
+
+/* The primary spectrum stays visible; archived depth and capture tools share one disclosure. */
+:root {
+  --background: #0c0d0e;
+  --panel: #141617;
+  --line: #2c2e2d;
+  --text: #f1eee7;
+  --muted: #abaea9;
+  --dim: #92958f;
+}
+body { background: var(--background); }
+.shell { max-width: 1280px; }
+.masthead { min-height: 62px; }
+.brand { gap: 10px; font-size: 19px; letter-spacing: -.035em; }
+.glyph, #air-preview svg, .preferences svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5;
+  stroke-linecap: round; stroke-linejoin: round; flex: none;
+}
+.brand .glyph { width: 32px; height: 32px; color: #ecc68b; }
+.refresh, #air-preview { display: inline-flex; align-items: center; gap: 8px; }
+.refresh { background: transparent; color: var(--text); border: 1px solid #474945; border-radius: 20px; }
+.refresh:hover { background: #232524; }
+.intro { position: relative; overflow: hidden; min-height: 130px; margin: 0; align-items: center; }
+.intro > div { position: relative; z-index: 1; }
+h1 { font-size: clamp(38px, 5vw, 65px); letter-spacing: -.055em; font-weight: 550; }
+.wave-plate { pointer-events: none; width: 42%; max-height: 106px; margin-left: auto; }
+.panel { border-radius: 12px; }
+.spectrum { background: linear-gradient(145deg, #181a1a, #111415 65%); }
+.spectrum-heading { min-height: 56px; }
+.band-heading { margin-bottom: 8px; }
+.band-heading h3 { font-size: 23px; letter-spacing: -.08em; }
+.band-heading small { letter-spacing: 0; }
+.legend i { width: 12px; height: 2px; border-radius: 1px; }
+.legend .overlap { height: 7px; background: repeating-linear-gradient(125deg, transparent 0 2px, #c88950 2px 3px); }
+.spectrum-plot { height: clamp(175px, 16vw, 214px); }
+.waterfall canvas { height: 51px; }
+.waterfall { border: 0; }
+.air-timeline { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); }
+.air-story { grid-template-columns: max-content 1fr; background: #1c1c18; }
+.air-route span { border: 0; padding: 4px; }
+.air-tools { justify-content: flex-start; }
+.air-note { padding: 10px 17px; }
+#air-preview[aria-pressed="true"] { outline: 1px solid var(--gold); }
+details > summary {
+  list-style: none; display: flex; align-items: center; gap: 10px;
+  padding: 13px 17px; min-height: 44px; cursor: pointer; color: var(--muted); font-size: 13px;
+}
+summary::-webkit-details-marker { display: none; }
+summary::after {
+  content: ""; margin-left: auto; width: 6px; height: 6px; border: solid currentColor;
+  border-width: 0 1px 1px 0; transform: rotate(45deg); transition: transform .16s ease;
+}
+details[open] > summary::after { transform: rotate(225deg); }
+summary:hover, summary:focus-visible { color: var(--text); }
+summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
+#archive-view, .preferences { border-top: 1px solid var(--line); }
+.preferences { margin-top: 18px; }
+.preferences-body { display: flex; flex-wrap: wrap; align-items: end; gap: 16px; padding: 0 17px 17px; }
+.preferences .air-auto { min-height: 36px; }
+@media (max-width: 570px) {
+  .intro { min-height: 107px; flex-direction: row; align-items: center; }
+  .intro > div { max-width: 80%; }
+  .wave-plate { position: absolute; right: -10%; width: 40%; opacity: .66; }
+  .refresh { min-height: 38px; }
+  .spectrum-plot { height: 149px; }
+  .waterfall canvas { height: 41px; }
+  .air-story, .air-timeline { grid-template-columns: minmax(0, 1fr); }
+  .air-timeline { padding-block: 10px; }
+  .preferences-body { align-items: start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  summary::after { transition: none; }
+}

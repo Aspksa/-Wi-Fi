@@ -431,7 +431,8 @@ const AirMap = (() => {
       el("air-auto").setAttribute("aria-pressed", String(auto));
       el("air-preview").setAttribute("aria-pressed", String(preview || storyStage === "suggest"));
       el("air-overlap").setAttribute("aria-pressed", String(Boolean(xray)));
-      el("air-preview").disabled = !state?.bands.some((band) => band.preview) || Boolean(currentStory);
+      el("air-preview").hidden = !state?.bands.some((band) => band.preview);
+      el("air-preview").disabled = Boolean(currentStory);
       el("air-overlap").disabled = !(liveFrame() || snapshots.length);
       for (const key of ["A", "B"]) {
         const button = el("air-set-" + key.toLowerCase());
@@ -445,6 +446,7 @@ const AirMap = (() => {
     }
 
     function writeStory(stage, episode, match) {
+      el("episode-story").hidden = !stage;
       const known = match && Math.abs(episode.at - match.at) <= ageLimit;
       const external = episode?.route === "external";
       const route = external ? "external" : episode?.route === "router" ? "router" : "";

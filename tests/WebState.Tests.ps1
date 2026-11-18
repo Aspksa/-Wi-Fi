@@ -98,7 +98,9 @@ try {
     $server.SetState(($state | ConvertTo-Json -Depth 8 -Compress))
     $server.SetSpectrum((ConvertTo-Json -InputObject $spectrum -Depth 8 -Compress))
     $items = @($client.GetStringAsync($server.Address + '/api/spectrum').GetAwaiter().GetResult() | ConvertFrom-Json)
-    Assert ($items.Count -eq 16 -and $items[-1].points[0].segments.Count -eq 1) 'Archived footprint data is served as JSON'
+    if ($items.Count -eq 1 -and $items[0] -is [array]) { $items = [object[]] $items[0] }
+    Assert ($items.Count -eq 16) 'Archived snapshot count served as JSON'
+    Assert (@($items[-1].points[0].segments).Count -eq 1) 'Archived footprint geometry served as JSON'
     Assert ($server.Address.StartsWith('http://127.0.0.1:')) 'The server binds to IPv4 loopback'
     $air = $client.GetStringAsync($server.Address + '/air-map.js').GetAwaiter().GetResult()
     Assert ($air.Contains('drawVolume')) 'The perspective renderer is available locally'

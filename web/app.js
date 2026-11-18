@@ -351,6 +351,26 @@ function renderState(next) {
     "router-no-reply": "Роутер не ответил на контрольные запросы.",
     "router-ok": "Роутер отвечает. Внешний замер недоступен.",
   })[state.link] || "Ожидание диагностики.";
+  const router = state.router || {};
+  const telemetry = state.routerTelemetry;
+  byId("router-source").textContent = telemetry ? "Импорт RE3L" : "Windows / шлюз";
+  byId("router-identity").textContent = "Адрес: " + (router.address || "не определён") +
+    " · Модель: " + (router.model || "не подтверждена") + " · Прошивка: " + (router.firmware || "неизвестна");
+  const cap = router.capabilities || {};
+  const hint = key => cap[key] === "interface-hint" ? "упоминание на странице (не проверено)" : "не подтверждено";
+  byId("router-capabilities").textContent = (router.explanation || "Доступность функций API пока неизвестна.") +
+    " · Соседние сети: " + hint("scan") + " · Настройки каналов: " + hint("channel") +
+    " · Эфирное время: " + hint("radio") + " · API изменения и отката: не подтверждено.";
+  const airtime = telemetry?.airtime || [];
+  byId("router-airtime").textContent = airtime.length ?
+    "Показатели из импорта (не проверены): " + airtime.map(item => item.band + " ГГц, канал " + item.channel + " · " + item.busyPercent + "%").join("; ") :
+    "Измеренная загрузка эфира: недоступна. Показанные пересечения — математическая оценка.";
+  byId("router-automation").textContent = state.automation?.reason || "Автоматическое управление недоступно.";
+  for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {
+    const evidence = state.evidence?.[band];
+    byId("evidence-" + suffix).textContent = (band === "2.4" ? "2,4" : "5") + " ГГц: " +
+      (evidence?.reasons?.join(" · ") || "Ожидание измерений");
+  }
   renderHeat();
   renderLists();
   renderMapControls();

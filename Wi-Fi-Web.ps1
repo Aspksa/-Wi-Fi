@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -68,6 +68,31 @@ function Set-WebRoute($Run, $Diagnostics) {
     $Run.Latency = @()
 }
 
+function Use-WebRouterFallback($Run, [long] $Now) {
+    $gateway = Get-WifiRouterAddress $Run.Diagnostics
+    $telemetry = Read-RouterTelemetry $Run.RouterTelemetryPath $gateway $Now
+    $Run.RouterTelemetry = $telemetry
+    if (-not $telemetry -or -not @($telemetry.points).Count) { return }
+    $Run.Points = @($telemetry.points)
+    $Run.ScanAt = $telemetry.capturedAt
+    $Run.Source = 'router-export'
+    $connected = @($Run.Points | Where-Object Own | ForEach-Object BSSID)
+    $Run.Plans.Clear()
+    $Run.Streak.Clear()
+    $Run.Evidence.Clear()
+    foreach ($band in @('2.4','5')) {
+        $plan = Get-ChannelPlan $Run.Points $band $connected
+        $Run.Plans[$band] = $plan
+        $Run.Advice[$band] = 'Импортирован снимок RE3L: оценка кандидатов доступна, но рекомендация не подтверждена живыми замерами.'
+        $Run.Evidence[$band] = Get-WifiRecommendationEvidence $plan $null $telemetry
+    }
+    $frames = @(Update-SpectrumFrames $Run.Spectrum (Get-SpectrumFrame $Run.ScanAt $Run.Points))
+    if ($frames.Count) {
+        $Run.Spectrum = $frames
+        $Run.Server.SetSpectrum((ConvertTo-Json -InputObject $frames -Depth 8 -Compress))
+    }
+}
+
 function Receive-WebScan($Run) {
     try {
         $result = Receive-WifiScanJob $Run.Worker
@@ -85,6 +110,7 @@ function Receive-WebScan($Run) {
             $Run.Link = Get-LinkState $result.Diagnostics
             Set-WebRoute $Run $result.Diagnostics
             Update-WifiRadio $Run.Engine $null (Get-UnixMilliseconds)
+            Use-WebRouterFallback $Run (Get-UnixMilliseconds)
             return
         }
         if ($result.Native) {
@@ -116,11 +142,13 @@ function Receive-WebScan($Run) {
             })
         }
         $latencyEvidence = Get-WifiLatencyEvidence @($Run.Engine.Samples) ([string] $radio.Network) (Get-UnixMilliseconds)
+        $Run.Evidence.Clear()
         foreach ($band in @('2.4', '5')) {
             $advice = Get-WifiRecommendation $Run.Points $band $connected $at $Run.Link $result.Native $Run.History `
                 $Run.Database $Run.Streak[$band] $Run.Forecast $latencyEvidence
             $Run.Streak[$band] = $advice.Streak
             $Run.Plans[$band] = $advice.Plan
+            $Run.Evidence[$band] = Get-WifiRecommendationEvidence $advice.Plan $latencyEvidence $Run.RouterTelemetry
             $Run.Advice[$band] = $advice.Text
             if ($advice.StorageNote) { $Run.Storage = $advice.StorageNote }
         }
@@ -253,12 +281,14 @@ $run = @{
     HomeName = ''; Points = @(); Spectrum = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @(); Episodes = @()
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
-    NextPrune = 0L; NextRouterCheck = 0L; Router = $null
+    NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
+    RouterTelemetryPath = ''; Evidence = @{}; Automation = Get-RouterAutomationPolicy $null $null
 }
 $server = $null
 try {
     $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Wi Fi'
     $legacy = Join-Path $folder 'history.json'
+    $run.RouterTelemetryPath = Join-Path $folder 'router-telemetry.json'
     try {
         $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
         $run.HomeName = [string] (Get-DatabaseSetting $run.Database 'home_ssid')
@@ -328,6 +358,23 @@ try {
             $run.NextRouterCheck = $now + 60000
             try { $run.Router = Get-WifiRouterInfo $run.Diagnostics }
             catch { $run.Router = [pscustomobject] @{ address = ''; status = 'unverified'; model = ''; firmware = ''; management = $false; spectrum = 'unverified'; explanation = 'Проверка роутера недоступна.' } }
+        }
+        if ($now -ge $run.NextRouterTelemetry) {
+            $run.NextRouterTelemetry = $now + 5000
+            try {
+                $run.RouterTelemetry = Read-RouterTelemetry $run.RouterTelemetryPath (Get-WifiRouterAddress $run.Diagnostics) $now
+            } catch { $run.RouterTelemetry = $null }
+            if ($run.ScanBlocked -and -not $run.Worker) {
+                if ($run.RouterTelemetry) {
+                    Use-WebRouterFallback $run $now
+                } elseif ($run.Source -eq 'router-export') {
+                    $run.Points = @()
+                    $run.ScanAt = 0L
+                    $run.Source = ''
+                    $run.Plans.Clear()
+                    $run.Evidence.Clear()
+                }
+            }
         }
         Update-WebProbes $run $now
         if ($now -ge $flushAt) {

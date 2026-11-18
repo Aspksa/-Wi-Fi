@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')

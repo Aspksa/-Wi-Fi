@@ -26,6 +26,9 @@ jobs:
       - name: Wi-Fi v2.2 recommendation guards and safe RE3L policy
         shell: powershell
         run: .\\tests\\RouterV22.Tests.ps1
+      - name: Neighbor Wi-Fi survey and freshness
+        shell: powershell
+        run: .\\tests\\NeighborScan.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

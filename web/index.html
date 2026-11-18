@@ -6,9 +6,20 @@
   <meta name="color-scheme" content="dark">
   <title>Wi Fi · Монитор эфира</title>
   <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/air-map.css">
+  <script src="/air-map.js" defer></script>
   <script src="/app.js" defer></script>
 </head>
 <body>
+  <svg class="air-symbols" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="icon-router" viewBox="0 0 24 24"><path d="M4 15h16v5H4zM7 15V9m10 6V9M5 6a10 10 0 0 1 14 0M8 9a6 6 0 0 1 8 0M8 17.5h1m3 0h1"/></symbol>
+    <symbol id="icon-spectrum" viewBox="0 0 24 24"><path d="M3 19h18M4 18c4 0 4-11 8-11s4 11 8 11M7 18c3 0 4-7 6-7s3 7 6 7"/></symbol>
+    <symbol id="icon-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 4 6 4 9s-1 6-4 9c-3-3-4-6-4-9s1-6 4-9Z"/></symbol>
+    <symbol id="icon-loss" viewBox="0 0 24 24"><path d="M10 3a9 9 0 0 0-6 13m2 3a9 9 0 0 0 13-1m2-4a9 9 0 0 0-7-11M9 9l6 6m0-6-6 6"/></symbol>
+    <symbol id="icon-layer" viewBox="0 0 24 24"><path d="m12 4 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 17l9 5 9-5"/></symbol>
+    <symbol id="icon-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7z"/></symbol>
+    <symbol id="icon-overlap" viewBox="0 0 24 24"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></symbol>
+  </svg>
   <main class="shell">
     <header class="masthead">
       <a class="brand" href="/" aria-label="Wi Fi, главная"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Wi<span>Fi</span></a>
@@ -38,6 +49,36 @@
         <div class="panel-heading spectrum-heading">
           <h2 id="spectrum-title">Карта эфира</h2>
           <div class="legend"><span><i class="own"></i>Своя сеть</span><span><i class="neighbor"></i>Соседи</span><span><i class="overlap"></i>Пересечение</span></div>
+        </div>
+        <div class="air-story">
+          <div class="air-route" aria-label="Где произошёл сбой">
+            <span data-air-route="radio"><svg aria-hidden="true"><use href="#icon-spectrum"/></svg> Эфир</span>
+            <i aria-hidden="true"></i>
+            <span data-air-route="router"><svg aria-hidden="true"><use href="#icon-router"/></svg> Роутер</span>
+            <i aria-hidden="true"></i>
+            <span data-air-route="external"><svg aria-hidden="true"><use href="#icon-globe"/></svg> Интернет</span>
+          </div>
+          <div class="air-story-copy">
+            <p id="air-event-title">Эфир в реальном времени</p>
+            <p id="air-event-detail">Карта связывает замеры сигнала со скачками задержки.</p>
+          </div>
+          <button type="button" class="quiet air-auto" id="air-auto" aria-pressed="true">
+            <svg aria-hidden="true"><use href="#icon-play"/></svg> Автопоказ
+          </button>
+        </div>
+        <div class="air-volumes">
+          <div class="air-volume">
+            <div class="volume-label"><h3>2,4 <small>ГГц</small></h3><span>Высота — сигнал</span></div>
+            <canvas id="air-volume-24" role="img" aria-label="Объёмная история сигналов в диапазоне 2,4 ГГц"></canvas>
+          </div>
+          <div class="air-volume">
+            <div class="volume-label"><h3>5 <small>ГГц</small></h3><span>Глубина — время</span></div>
+            <canvas id="air-volume-5" role="img" aria-label="Объёмная история сигналов в диапазоне 5 ГГц"></canvas>
+          </div>
+        </div>
+        <div class="air-timeline">
+          <div class="air-episode-list"><span>Эпизоды</span><div id="air-episodes" aria-label="Эпизоды задержки"></div></div>
+          <div class="air-latency"><span>Отклик роутера</span><canvas id="latency" role="img" aria-label="График отклика роутера за последнюю минуту"></canvas></div>
         </div>
         <div class="spectrum-bands">
           <div class="spectrum-band">
@@ -75,6 +116,19 @@
             <button id="go-live" class="quiet" type="button" hidden>К текущему</button>
           </div>
         </div>
+        <div class="air-tools">
+          <div class="air-actions">
+            <button type="button" class="quiet" id="air-preview" aria-pressed="false"><svg aria-hidden="true"><use href="#icon-layer"/></svg> Примерить совет</button>
+            <button type="button" class="quiet" id="air-overlap" aria-pressed="false"><svg aria-hidden="true"><use href="#icon-overlap"/></svg> Пересечения</button>
+          </div>
+          <div class="air-actions comparison">
+            <button type="button" class="quiet" id="air-set-a">Снимок A</button>
+            <button type="button" class="quiet" id="air-set-b">Снимок B</button>
+            <button type="button" class="quiet" id="air-swap" hidden>Показать A</button>
+            <button type="button" class="quiet" id="air-clear-compare" hidden>Сбросить</button>
+          </div>
+          <p id="air-comparison" class="air-note" role="status" hidden></p>
+        </div>
       </section>
 
       <div class="sidebar">
@@ -84,7 +138,6 @@
             <div><span>До роутера</span><strong id="router-value">—</strong><small id="router-loss">Нет замера</small></div>
             <div><span>До интернета</span><strong id="internet-value">—</strong><small id="internet-loss">Нет замера</small></div>
           </div>
-          <canvas id="latency" role="img" aria-label="График отклика роутера за последнюю минуту"></canvas>
           <p id="link" class="link-message">Ожидание подключения.</p>
         </section>
         <section class="panel choices" aria-labelledby="advice-title">

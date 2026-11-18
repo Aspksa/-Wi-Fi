@@ -30,6 +30,8 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
     foreach ($key in @($current.Keys | Sort-Object)) {
         $point=$current[$key]
         $previous=$Tracker.Seen[$key]
+        $observed=$(if ($point.ObservedAt) {[long]$point.ObservedAt} else {$ScanAt})
+        if ($previous -and $observed -le [long]$previous.LastObservation) { continue }
         if ($previous) {
             if ([int]$previous.Channel -ne [int]$point.Channel) {
                 $Tracker.Changes=@([pscustomobject]@{
@@ -51,6 +53,7 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
             $previous.Channel=[int]$point.Channel
             $previous.Signal=[int]$point.Signal
             $previous.LastSeen=$ScanAt
+            $previous.LastObservation=$observed
             $previous.Sightings++
             $previous.Misses=0
             $previous.Present=$true
@@ -59,7 +62,7 @@ function Update-WifiNeighborTracker($Tracker, [object[]] $Points, [long] $ScanAt
             $Tracker.Seen[$key]=[pscustomobject]@{
                 Key=$key;Name=[string]$point.SSID;Band=[string]$point.Band
                 Channel=[int]$point.Channel;Signal=[int]$point.Signal
-                FirstSeen=$ScanAt;LastSeen=$ScanAt;Sightings=1;Misses=0;Present=$true
+                FirstSeen=$ScanAt;LastSeen=$ScanAt;LastObservation=$observed;Sightings=1;Misses=0;Present=$true
                 SignalTotal=[int]$point.Signal;SignalJumps=0;ChannelChanges=0
             }
             $Tracker.Changes=@([pscustomobject]@{

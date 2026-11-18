@@ -13,11 +13,8 @@ Assert (-not (Get-WifiRecommendationGuard $plan $latency $null 'Windows WLAN' ($
 Assert (-not (Get-WifiRecommendationGuard $plan ([pscustomobject]@{Samples=30;Classification='external'}) $null 'Windows WLAN' ($now-5000) $now $true).eligible) 'External-only incident guard'
 Assert (-not (Get-WifiRecommendationGuard $plan $latency ([pscustomobject]@{status='improving'}) 'Windows WLAN' ($now-5000) $now $true).eligible) 'Do not switch if signal improving'
 Assert (-not (Get-WifiRecommendationGuard $plan ([pscustomobject]@{Samples=1;Classification='local'}) $null 'Windows WLAN' ($now-5000) $now $true).eligible) 'Single bad probe guard'
-$cap=[pscustomobject]@{status='inspection-only';entries=@([pscustomobject]@{method='GET';status=200;usable=$false;path='/api/test'})}
-$assessment=Get-Re3lCaptureAssessment $cap 'V1.0.0'
-Assert ($assessment.status -eq 'capture-only' -and -not $assessment.readReady -and -not $assessment.writeReady -and -not $assessment.rollbackReady) 'Captured endpoints not verified'
-$policy=Get-Re3lSafeWritePolicy $null $cap
-Assert (-not $policy.enabled -and -not $policy.rollbackSupported -and $policy.needsPhysicalVerification) 'No channel changes without tested driver'
+$policy=Get-WifiSafeWritePolicy
+Assert (-not $policy.enabled -and -not $policy.rollbackSupported -and $policy.lastKnownGoodRequired) 'Universal channel writes disabled'
 $patterns=@(Get-WifiRepeatedHourlyIssues @(
     [pscustomobject]@{band='2.4';channel=6;hourUtc='2026-11-17 22:00';samples=30;badPercent=25}
     [pscustomobject]@{band='2.4';channel=6;hourUtc='2026-11-18 22:00';samples=35;badPercent=22}
@@ -30,4 +27,4 @@ Assert ($source.kind -eq 'measured' -and $source.airtime -eq 'not-measured') 'AP
 $import=Get-WifiObservedSource 'router-export' ([pscustomobject]@{capturedAt=$now-1000}) $now
 Assert ($import.kind -eq 'unverified-import') 'Manual router import never verified'
 Assert ((Get-WifiObservedSource 'router-export' ([pscustomobject]@{capturedAt=$now-90000}) $now).kind -eq 'unavailable') 'Stale router import excluded'
-'Wi-Fi v2.2 safety and evidence tests passed'
+'Wi-Fi v2.2 universal safety and evidence tests passed'

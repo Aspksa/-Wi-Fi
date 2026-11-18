@@ -313,7 +313,7 @@ $run = @{
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
-    Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null
+    Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null; WlanEvents=$null
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -337,6 +337,7 @@ try {
     $run.WanTarget = [Net.IPAddress]::Parse('1.1.1.1')
     $run.CaptureSupport = Get-WifiV3CaptureCapabilities
     $run.DirectInventory = Get-WifiV3DirectInventory
+    $run.WlanEvents = Get-WifiV3DriverEvents
     $server = [WiFi.WebServer]::new((Join-Path $PSScriptRoot 'web'))
     $run.Server = $server
     if ($run.Database) {

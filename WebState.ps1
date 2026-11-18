@@ -106,6 +106,16 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         captureSupport = $Session.CaptureSupport
         directInventory = $Session.DirectInventory
         wlanEvents = $Session.WlanEvents
+        adapters = @($Session.AdapterInventory)
+        selectedAdapter = [string]$Session.SelectedAdapter
+        recovery = [pscustomobject]@{
+            failures=$(if($Session.Recovery){[int]$Session.Recovery.Failures}else{0})
+            events=@($(if($Session.Recovery){$Session.Recovery.Events}))
+            category=Get-WifiFailureCategory ([string]$Session.Issue) ([bool]$Session.ScanBlocked) $false
+        }
+        startupChecks = $Session.StartupChecks
+        hardwareBands = @(Get-WifiBandEvidence @($Session.Points))
+        performance = Get-WifiPerformanceSnapshot ([long]$Session.ScanStartedAt) $Now ([int]$Session.ScanFailures)
         researchV3 = Get-WifiV3Hypotheses (Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)) (Get-WifiNeighborEvolution $Session.NeighborTracker $Now) @($Session.HourlyNeighbors)
         scanConfidence = Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count
         permissionGuidance = Get-WifiPermissionGuidance ([bool]$Session.ScanBlocked) ([string]$Session.Issue)

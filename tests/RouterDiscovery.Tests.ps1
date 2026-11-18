@@ -6,6 +6,12 @@ function Assert($condition, [string] $message) { if (-not $condition) { throw $m
 $router = Get-WifiRouterIdentity '<html><title>Tenda RE3L</title><p>Firmware Version: V16.03.53.04</p></html>'
 Assert ($router.Model -eq 'RE3L') 'Model detection'
 Assert ($router.Firmware -eq 'V16.03.53.04') 'Firmware detection'
+$hints = Get-WifiRouterCapabilityHints '<html>Wireless channel / Channel utilization / Site Survey</html>'
+Assert ($hints.scan -eq 'interface-hint' -and $hints.channel -eq 'interface-hint' -and $hints.radio -eq 'interface-hint') 'HTML hints classified'
+Assert ($hints.write -eq 'not-confirmed' -and $hints.rollback -eq 'not-confirmed') 'Never infer unsafe write access'
+$emptyHints = Get-WifiRouterCapabilityHints '<html>Login</html>'
+Assert ($emptyHints.scan -eq 'not-confirmed') 'No scan claim on login only'
+
 Assert (-not (Get-WifiRouterAddress ([pscustomobject] @{ Gateway = '8.8.8.8' }))) 'Reject public gateway'
 Assert ((Get-WifiRouterAddress ([pscustomobject] @{ Gateway = '192.168.1.1' })) -eq '192.168.1.1') 'Accept private Wi-Fi gateway'
 $now = 1000000L

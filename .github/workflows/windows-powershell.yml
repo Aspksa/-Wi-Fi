@@ -1,0 +1,22 @@
+name: Windows PowerShell compatibility
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PowerShell 5.1 syntax and BOM
+        shell: powershell
+        run: .\\tests\\PowerShellSyntax.Tests.ps1
+      - name: Router telemetry safety
+        shell: powershell
+        run: .\\tests\\RouterTelemetry.Tests.ps1
+      - name: Router identification and diagnostics
+        shell: powershell
+        run: .\\tests\\RouterDiscovery.Tests.ps1
+      - name: Existing web tests
+        shell: pwsh
+        run: node --test tests/WebMap.test.cjs

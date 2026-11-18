@@ -59,13 +59,15 @@ function Get-WifiBandEvidence([object[]]$Points) {
 }
 function Get-WifiPerformanceSnapshot([long]$StartedAt,[long]$Now,[int]$FailureCount) {
     $process=[Diagnostics.Process]::GetCurrentProcess()
-    [pscustomobject]@{
-        processWorkingSetMb=[Math]::Round($process.WorkingSet64/1MB,1)
-        cpuSeconds=[Math]::Round($process.TotalProcessorTime.TotalSeconds,1)
-        scanElapsedMs=$(if($StartedAt -gt 0){[Math]::Max(0,$Now-$StartedAt)}else{0})
-        consecutiveFailures=$FailureCount
-        cpuPercent='unavailable-without-timed-samples'
-    }
+    try {
+        [pscustomobject]@{
+            processWorkingSetMb=[Math]::Round($process.WorkingSet64/1MB,1)
+            cpuSeconds=[Math]::Round($process.TotalProcessorTime.TotalSeconds,1)
+            scanElapsedMs=$(if($StartedAt -gt 0){[Math]::Max(0,$Now-$StartedAt)}else{0})
+            consecutiveFailures=$FailureCount
+            cpuPercent='unavailable-without-timed-samples'
+        }
+    } finally { $process.Dispose() }
 }
 function Get-WifiAlertState($Recovery,[string]$FailureCategory,[long]$Now) {
     $serious=$FailureCategory -in @('permissions','timeout','wlan-service','driver-or-api')

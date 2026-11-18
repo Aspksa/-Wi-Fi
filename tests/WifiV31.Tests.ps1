@@ -109,6 +109,9 @@ try{
     Assert $invalid 'Corrupt PCAPNG block length rejected'
 } finally {[IO.Directory]::Delete($ngDir,$true)}
 Add-Type -Path (Join-Path $root 'WifiNativeScan.cs')
+$rejected=$false
+try{[void][WiFi.NativeScanner]::Scan(0,'not-a-guid')}catch{$rejected=$true}
+Assert $rejected 'Invalid adapter GUID is rejected before any scan or driver call'
 $method=[WiFi.NativeScanner].GetMethod('ChannelOf',[Reflection.BindingFlags]'Static,NonPublic')
 $args=[object[]]@(5955,$null)
 $ch=$method.Invoke($null,$args)

@@ -3,7 +3,9 @@ function Get-WifiRouterAddress($Diagnostics) {
     if (-not $Diagnostics -or -not $Diagnostics.Gateway) { return $null }
     $address = $Diagnostics.Gateway
     if ($address -isnot [Net.IPAddress]) {
-        if (-not [Net.IPAddress]::TryParse([string] $address, [ref] $address)) { return $null }
+        $parsed = $null
+        if (-not [Net.IPAddress]::TryParse([string] $address, [ref] $parsed)) { return $null }
+        $address = $parsed
     }
     if ($address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork) { return $null }
     $bytes = $address.GetAddressBytes()
@@ -74,8 +76,8 @@ function Get-WifiRouterInfo($Diagnostics) {
             try {
                 $chars = New-Object char[] 131072
                 $count = $reader.Read($chars, 0, $chars.Length)
-                $identity = Get-WifiRouterIdentity (-join $chars[0..([Math]::Max(0, $count - 1))])
                 if ($count -gt 0) {
+                    $identity = Get-WifiRouterIdentity (-join $chars[0..($count - 1)])
                     $result.model = $identity.Model
                     $result.firmware = $identity.Firmware
                 }

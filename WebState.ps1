@@ -67,13 +67,17 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
     $bands = foreach ($band in @('2.4', '5')) {
         $plan = $Session.Plans[$band]
         $suggestion = $Session.Advice[$band]
+        $confirmation = Get-WifiRecommendationConfidence $(if($Session.RecommendationGuards){$Session.RecommendationGuards[$band]}) (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)
+        if ($plan.Improves -and -not $confirmation.eligible) {
+            $suggestion = 'Пока только расчётный кандидат. Для ручной проверки нужны свежие независимые измерения.'
+        }
         $preview = if ($plan.Improves -and $plan.Home -and $plan.Best.Width) {
             $footprint = Get-CandidateFootprint $band $plan.Best.Channel $plan.Home $plan.Best.Width
             if ($footprint) {
                 [pscustomobject] @{
                     channel = $plan.Best.Channel; width = $plan.Best.Width; frequency = $footprint.Primary
                     segments = @(Get-SignalSegments $footprint)
-                    confirmed = [bool] ($Session.Streak -and $Session.Streak[$band].Confirmed)
+                    confirmed = [bool] ($confirmation.eligible -and $Session.Streak -and $Session.Streak[$band].Confirmed)
                     fromScore = $plan.Current.Score; toScore = $plan.Best.Score
                 }
             }
@@ -94,7 +98,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         neighborEvolution = Get-WifiNeighborEvolution $Session.NeighborTracker $Now
         scanConfidence = Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count
         permissionGuidance = Get-WifiPermissionGuidance ([bool]$Session.ScanBlocked) ([string]$Session.Issue)
-        adapterSummary = Get-WifiAdapterSummary $Session.Adapter
+        adapterSummary = Get-WifiAdapterSummary $Session.Adapter ([string]$Session.AdapterDriverVersion)
         interference = @((Get-WifiInterferenceEvidence @($Session.Points) '2.4'), (Get-WifiInterferenceEvidence @($Session.Points) '5'))
         recommendationConfidence = @{
             '2.4' = Get-WifiRecommendationConfidence $(if($Session.RecommendationGuards){$Session.RecommendationGuards['2.4']}) (Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count) ([int]$Session.NeighborTracker.CompletedSurveys)

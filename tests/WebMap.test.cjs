@@ -137,3 +137,10 @@ test("phone snapshots do not imply a radio cause of a Windows latency episode", 
   page.run("air.tick(2000)");
   assert.equal(page.run("air.frame()"), null);
 });
+
+test("six GHz is optional observed radio band in Canvas with no invented channel advice", () => {
+  const page = dashboard();
+  assert.equal(page.run('sources.find(b => b.key === "6").suffix'), "6");
+  assert.equal(typeof page.get("spectrum-6").listeners.click, "function");
+  assert.equal(typeof page.get("waterfall-6").listeners.click, "function");
+});

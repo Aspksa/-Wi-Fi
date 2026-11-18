@@ -399,7 +399,8 @@ function renderState(next) {
   const adapter = state.adapterSummary || {};
   byId("scan-adapter").textContent = "Wi-Fi-адаптер: " + (adapter.name || "не определён") +
     " · " + (adapter.description || "модель не определена") +
-    " · драйвер и диапазоны: " + (adapter.driver === "not-verified" ? "не проверены" : "неизвестно");
+    " · драйвер: " + (adapter.driver === "not-verified" ? "не подтверждён" : adapter.driver || "неизвестно") +
+    " · поддерживаемые диапазоны: не подтверждены";
   byId("scan-confidence").textContent = "Достоверность снимка: " + ({
     observed:"завершённый Windows WLAN", "cached-or-incomplete":"кэш / неполный скан",
     "unverified-cache":"netsh, свежесть кэша неизвестна",

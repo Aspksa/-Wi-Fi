@@ -1,4 +1,4 @@
-# Diagnose the affected route using measured probes, not estimated spectrum occupancy.
+﻿# Diagnose the affected route using measured probes, not estimated spectrum occupancy.
 function Get-WifiLatencyEvidence([object[]] $Samples, [string] $Network, [long] $Now) {
     $recent = @($Samples | Where-Object {
         $_.Network -eq $Network -and $_.At -ge ($Now - 120000) -and $_.At -le $Now -and

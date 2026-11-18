@@ -112,6 +112,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         trend = $Session.Trend
         hourlyEfficiency = @($Session.HourlyEfficiency)
         recentTrials = @($Session.RecentTrials)
+        hourlyNeighbors = @($Session.HourlyNeighbors)
         home = $Session.HomeName
         tracked = Get-WebPointId $Session.History.Tracked
         trackedName = $Session.History.Tracked.SSID

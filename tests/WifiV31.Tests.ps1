@@ -59,4 +59,49 @@ try {
     if($db){$db.Dispose()}
     [IO.Directory]::Delete($folder,$true)
 }
-'Wi-Fi v3.1 resilience and SQLite long-term-memory tests passed'
+# Synthetic PCAPNG: SHB, IDB (105) and an EPB with one Beacon.
+$ngDir=Join-Path ([IO.Path]::GetTempPath()) ('wifi-pcapng-'+[guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($ngDir)
+$ngPath=Join-Path $ngDir 'beacon.pcapng'
+try{
+    $beacon=[byte[]]::new(36)
+    $beacon[0]=0x80
+    [Array]::Copy([byte[]]@(1,2,3,4,5,6),0,$beacon,16,6)
+    $payload=[byte[]]($beacon+[byte[]]@(0,0))
+    $padded=[byte[]]($payload+[byte[]]@(0,0))
+    $out=[IO.File]::Create($ngPath)
+    $write=[IO.BinaryWriter]::new($out)
+    try {
+        $write.Write([byte[]]@(0x0a,0x0d,0x0d,0x0a))
+        $write.Write([uint32]28)
+        $write.Write([byte[]]@(0x4d,0x3c,0x2b,0x1a,1,0,0,0,255,255,255,255,255,255,255,255))
+        $write.Write([uint32]28)
+        $write.Write([uint32]1);$write.Write([uint32]20)
+        $write.Write([uint16]105);$write.Write([uint16]0)
+        $write.Write([uint32]65535);$write.Write([uint32]20)
+        $write.Write([uint32]6);$write.Write([uint32]72)
+        $write.Write([uint32]0);$write.Write([uint32]0);$write.Write([uint32]0)
+        $write.Write([uint32]38);$write.Write([uint32]38)
+        $write.Write($padded);$write.Write([uint32]72)
+    } finally {$write.Dispose()}
+    $ng=Read-WifiPcapng $ngPath
+    Assert ($ng.format -eq 'pcapng' -and $ng.networks.Count -eq 1 -and $ng.networks[0].hiddenSsid) 'PCAPNG synthetic beacon imported'
+    $bytes=[IO.File]::ReadAllBytes($ngPath)
+    $bytes[$bytes.Length-1]=0
+    [IO.File]::WriteAllBytes($ngPath,$bytes)
+    $invalid=$false
+    try {[void](Read-WifiPcapng $ngPath)} catch {$invalid=$true}
+    Assert $invalid 'Corrupt PCAPNG block length rejected'
+} finally {[IO.Directory]::Delete($ngDir,$true)}
+Add-Type -Path (Join-Path $root 'WifiNativeScan.cs')
+$method=[WiFi.NativeScanner].GetMethod('ChannelOf',[Reflection.BindingFlags]'Static,NonPublic')
+$args=[object[]]@(5955,$null)
+$ch=$method.Invoke($null,$args)
+Assert ($ch -eq 1 -and $args[1] -eq '6') '6 GHz channel one via native frequency'
+$args=[object[]]@(5935,$null)
+Assert ($method.Invoke($null,$args) -eq 2 -and $args[1] -eq '6') '6 GHz channel 2 special frequency'
+$args=[object[]]@(7115,$null)
+Assert ($method.Invoke($null,$args) -eq 233) '6 GHz upper edge'
+$args=[object[]]@(7145,$null)
+Assert ($method.Invoke($null,$args) -eq 0) 'Out-of-band entry excluded'
+'Wi-Fi v3.1 resilience, radio geometry, PCAPNG and backup tests passed'

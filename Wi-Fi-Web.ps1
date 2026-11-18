@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -66,6 +66,9 @@ function Set-WebRoute($Run, $Diagnostics) {
     $Run.WanSample = $null
     $Run.Traffic = $null
     $Run.Latency = @()
+    $Run.RecommendationGuards.Clear()
+    $Run.RepeatedIssues = @()
+    $Run.SourceEvidence = $null
     $Run.Router = $null
     $Run.RouterTelemetry = $null
     $Run.ApiCapture = $null
@@ -294,7 +297,8 @@ $run = @{
     NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
     RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
-    Automation = Get-RouterAutomationPolicy $null $null
+    SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
+    Automation = Get-Re3lSafeWritePolicy $null $null
 }
 $server = $null
 try {
@@ -413,6 +417,19 @@ try {
                 # Telemetry failures are isolated from the ping and scan loop.
                 $run.Trend = [pscustomobject] @{ status='unavailable'; reason='Не удалось обработать статистику измерений.' }
             }
+        }
+        # Guardrails cannot trigger router writes; they only annotate the existing advice.
+        try {
+            $run.SourceEvidence = Get-WifiObservedSource $run.Source $run.RouterTelemetry $now
+            $run.CaptureAssessment = Get-Re3lCaptureAssessment $run.ApiCapture ([string]$run.Router.firmware)
+            $run.RecommendationGuards.Clear()
+            foreach ($band in @('2.4','5')) {
+                $latency = Get-WifiLatencyEvidence @($run.Engine.Samples) ([string]$run.Engine.Radio.Network) $now
+                $run.RecommendationGuards[$band] = Get-WifiRecommendationGuard $run.Plans[$band] $latency $run.Trend $run.Source ([long]$run.ScanAt) $now ([bool]$run.Streak[$band].Confirmed)
+            }
+            $run.RepeatedIssues = @(Get-WifiRepeatedHourlyIssues @($run.HourlyEfficiency))
+        } catch {
+            $run.RepeatedIssues = @()
         }
         if ($now -ge $flushAt) {
             Save-WebMeasurements $run $now

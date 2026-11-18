@@ -456,6 +456,10 @@ function renderState(next) {
     " · аномалий BSSID " + (research.anomalies?.length || 0) +
     " · источник " + (research.source || "не подтверждён") +
     " · выводы требуют независимых проб.";
+  byId("scan-ssid-variation").textContent = state.ssidVariations?.length ?
+    "Одинаковые SSID с разными объявлениями (не доказательство подмены): " +
+    state.ssidVariations.map(v => v.ssid + " · " + v.accessPoints + " BSSID").join("; ") :
+    "Изменений объявленных параметров под одним SSID не обнаружено или данных недостаточно.";
   byId("scan-alerts").textContent = research.alerts?.length ?
     "Диагностика: " + research.alerts.slice(0,3).map(a => a.kind + " · " +
       new Date(a.at).toLocaleTimeString("ru-RU")).join("; ") :
@@ -476,7 +480,7 @@ function renderState(next) {
   byId("neighbor-stability").textContent = "Динамика сети: нестабильных точек " +
     (evolution.volatile || 0) + " · " +
     (evolution.strongest || []).map(p => (p.name || "Скрытая сеть") +
-      " (средний сигнал " + p.meanSignal + "%, " + p.sightings + " наблюдений)").join("; ");
+      " (средний сигнал " + p.meanSignal + "%, RSSI " + (p.averageRssi ?? "—") + " дБм, " + p.sightings + " наблюдений)").join("; ");
   const changeLabels = { "new-observation": "новая точка", "channel-shift": "смена наблюдаемого канала", "not-observed": "отсутствует в двух снимках" };
   byId("neighbor-changes").textContent = evolution.changes?.length ?
     "Изменения за последний час: " + evolution.changes.map(e =>

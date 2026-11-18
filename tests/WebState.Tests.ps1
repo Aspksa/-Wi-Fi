@@ -56,6 +56,17 @@ $archive | Add-Member -MemberType ScriptMethod -Name Query -Value { param($sql, 
 $restored = @(Read-WebSpectrum $archive 200000L)
 Assert ($restored.Count -eq 1 -and $restored[0].at -eq 145000L -and $restored[0].points[0].id -eq (Get-WebPointId $ownPoint)) 'Archived JSON restores chronologically and skips malformed or duplicate records'
 
+$run.Streak = @{ '5' = @{ Samples = 3 } }
+$run.Episodes = @((Get-WebEpisode @{
+    Id='probe-1'; At=195000L; Ended=196000L; Network='5|mesh'; Cause='local-overlap'; Message='Скачок'
+}))
+$projection = Get-WebState $run (Get-UnixMilliseconds) $now
+Assert ($projection.bands[1].preview.confirmed -and $projection.bands[1].preview.width -eq 80 -and
+    $projection.bands[1].preview.segments.Count -gt 0) 'The browser receives the confirmed candidate geometry'
+Assert ($projection.episodes[0].band -eq '5' -and $projection.episodes[0].route -eq 'router') 'Archived WLAN evidence identifies the correct radio'
+$externalEpisode = Get-WebEpisode @{ Id='wan'; At=195500L; Network='2.4|mesh'; Cause='upload'; Message='Внешняя задержка' }
+Assert ($externalEpisode.route -eq 'external') 'External episodes keep their route classification'
+
 $server = [WiFi.WebServer]::new((Join-Path $project 'web'))
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.UseProxy = $false
@@ -67,6 +78,8 @@ try {
     $items = @($client.GetStringAsync($server.Address + '/api/spectrum').GetAwaiter().GetResult() | ConvertFrom-Json)
     Assert ($items.Count -eq 16 -and $items[-1].points[0].segments.Count -eq 1) 'Archived footprint data is served as JSON'
     Assert ($server.Address.StartsWith('http://127.0.0.1:')) 'The server binds to IPv4 loopback'
+    $air = $client.GetStringAsync($server.Address + '/air-map.js').GetAwaiter().GetResult()
+    Assert ($air.Contains('drawVolume')) 'The perspective renderer is available locally'
     $page = $client.GetStringAsync($server.Address).GetAwaiter().GetResult()
     Assert ($page.Contains('spectrum-24') -and $page.Contains('spectrum-5')) 'The dashboard page is served'
     $json = $client.GetStringAsync($server.Address + '/api/state').GetAwaiter().GetResult() | ConvertFrom-Json
@@ -96,4 +109,4 @@ try {
     $client.Dispose()
     $server.Dispose()
 }
-'Passed 21 web dashboard, history and local HTTP checks'
+'Passed 25 web dashboard, history and local HTTP checks'

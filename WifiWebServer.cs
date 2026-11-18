@@ -52,7 +52,9 @@ namespace WiFi
             {
                 { "/", new Asset("text/html; charset=utf-8", Path.Combine(root, "index.html")) },
                 { "/app.css", new Asset("text/css; charset=utf-8", Path.Combine(root, "app.css")) },
-                { "/app.js", new Asset("text/javascript; charset=utf-8", Path.Combine(root, "app.js")) }
+                { "/app.js", new Asset("text/javascript; charset=utf-8", Path.Combine(root, "app.js")) },
+                { "/air-map.js", new Asset("text/javascript; charset=utf-8", Path.Combine(root, "air-map.js")) },
+                { "/air-map.css", new Asset("text/css; charset=utf-8", Path.Combine(root, "air-map.css")) }
             };
             listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start(16);

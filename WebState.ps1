@@ -10,6 +10,8 @@ function ConvertTo-WebPoint($Point, $Tracked) {
         band = $Point.Band
         channel = $Point.Channel
         signal = $Point.Signal
+        rssi = $Point.Rssi
+        observedAt = $Point.ObservedAt
         signalText = Format-WifiSignal $Point
         frequency = $shape.Primary
         segments = @(Get-SignalSegments $shape)
@@ -41,10 +43,22 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
     $bands = foreach ($band in @('2.4', '5')) {
         $plan = $Session.Plans[$band]
         $suggestion = $Session.Advice[$band]
+        $preview = if ($plan.Improves -and $plan.Home -and $plan.Best.Width) {
+            $footprint = Get-CandidateFootprint $band $plan.Best.Channel $plan.Home $plan.Best.Width
+            if ($footprint) {
+                [pscustomobject] @{
+                    channel = $plan.Best.Channel; width = $plan.Best.Width; frequency = $footprint.Primary
+                    segments = @(Get-SignalSegments $footprint)
+                    confirmed = [bool] ($Session.Streak -and $Session.Streak[$band].Samples -ge 3)
+                    fromScore = $plan.Current.Score; toScore = $plan.Best.Score
+                }
+            }
+        }
         [pscustomobject] @{
             key = $band; ownId = Get-WebPointId $plan.Home
             channel = $plan.Home.Channel
             width = $plan.Current.Width
+            preview = $preview
             advice = if ($suggestion) { $suggestion } else { 'Ожидание первого замера.' }
             heat = @(Get-WebHeat $Session.History $At $band)
         }
@@ -61,6 +75,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         points = @(foreach ($point in $Session.Points) { ConvertTo-WebPoint $point $Session.History.Tracked })
         latency = @($Session.Latency | Where-Object { $Now - $_.at -le 60000 })
         events = @($Session.History.Events | Select-Object -First 100)
+        episodes = @($Session.Episodes)
     }
 }
 
@@ -122,4 +137,26 @@ ORDER BY at_ms DESC LIMIT 80
         }
     }
     $frames
+}
+
+function Get-WebEpisode($Entry) {
+    $band = ([string] $Entry.Network -split '\|', 2)[0]
+    $route = if ($Entry.Cause -in @('external', 'upload')) { 'external' }
+             elseif ($Entry.Cause -in @('local', 'local-overlap')) { 'router' }
+             else { 'uncertain' }
+    [pscustomobject] @{
+        id = $Entry.Id; at = $Entry.At; ended = $Entry.Ended; band = $band
+        route = $route; message = $Entry.Message
+    }
+}
+
+function Read-WebEpisodes($Database, [long] $Now) {
+    $rows = $Database.Query(@'
+SELECT id, at_ms, ended_ms, network, cause, description
+FROM incidents WHERE at_ms >= ? AND at_ms <= ?
+ORDER BY at_ms DESC LIMIT 8
+'@, @(($Now - 3600000L), $Now))
+    foreach ($row in $rows) {
+        Get-WebEpisode @{ Id = $row[0]; At = $row[1]; Ended = $row[2]; Network = $row[3]; Cause = $row[4]; Message = $row[5] }
+    }
 }

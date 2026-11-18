@@ -124,9 +124,13 @@ function Receive-WebScan($Run) {
 }
 
 function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
-    $Run.Latency = @($Run.Latency | Where-Object { $At - $_.at -le 60000 }) +
-        @([pscustomobject] @{ at = $At; ms = $Milliseconds; lost = $Lost })
-    if ($Run.Active -or $Run.LanDuringScan) { return }
+    $liveSample = [pscustomobject] @{
+        at = $At; ms = $Milliseconds; lost = $Lost
+        scan = [bool] ($Run.Active -or $Run.LanDuringScan)
+        band = $null; wanMs = $null; wanLost = $null
+    }
+    $Run.Latency = @($Run.Latency | Where-Object { $At - $_.at -le 60000 }) + @($liveSample)
+    if ($liveSample.scan) { return }
     $radio = $Run.Engine.Radio
     if ($radio -and ($At - $radio.At -gt 45000 -or
             ($radio.ObservedAt -and $At - $radio.ObservedAt -gt 45000))) { $radio = $null }
@@ -141,6 +145,9 @@ function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
     $external = $Run.WanSample
     $Run.WanSample = $null
     if ($external -and $At - $external.At -gt 1400) { $external = $null }
+    $liveSample.band = $radio.Band
+    $liveSample.wanMs = $external.Milliseconds
+    $liveSample.wanLost = $external.Lost
     $overlap = if ($radio) {
         if ($radio.ChangedAt -gt 0 -and $At - $radio.ChangedAt -lt 45000) { 'changed' }
         elseif ($radio.Signature) { 'strong' }
@@ -159,6 +166,9 @@ function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
     })
     foreach ($entry in $entries) {
         Add-MonitorEvent $Run.History (Get-Date) $entry.Message
+        if ($entry.Cause) {
+            $Run.Episodes = @((Get-WebEpisode $entry)) + @($Run.Episodes | Select-Object -First 7)
+        }
         if ($entry.Forecast -and $radio) {
             $Run.Forecast = @{ At = $At; Band = $radio.Band; Network = $radio.Network; Text = $entry.Message }
             $Run.Advice[$radio.Band] = $entry.Message
@@ -216,7 +226,7 @@ if (-not $ownsMutex) {
 }
 $run = @{
     Engine = New-WifiIntelligence; History = New-MonitorHistory; Database = $null
-    HomeName = ''; Points = @(); Spectrum = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @()
+    HomeName = ''; Points = @(); Spectrum = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @(); Episodes = @()
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L
@@ -240,7 +250,11 @@ try {
     $server = [WiFi.WebServer]::new((Join-Path $PSScriptRoot 'web'))
     $run.Server = $server
     if ($run.Database) {
-        try { $run.Spectrum = @(Read-WebSpectrum $run.Database (Get-UnixMilliseconds)) }
+        try {
+            $now = Get-UnixMilliseconds
+            $run.Spectrum = @(Read-WebSpectrum $run.Database $now)
+            $run.Episodes = @(Read-WebEpisodes $run.Database $now)
+        }
         catch { $run.Storage = 'Не удалось прочитать предыдущие снимки эфира.' }
     }
     $server.SetSpectrum((ConvertTo-Json -InputObject $run.Spectrum -Depth 8 -Compress))

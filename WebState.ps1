@@ -178,7 +178,7 @@ function Set-WebTrackedPoint($Session, [string] $Value, [datetime] $At) {
 function Get-SpectrumFrame([long] $At, [object[]] $Points) {
     $fresh = @($Points | Where-Object { $_.Fresh -ne $false })
     if (-not $fresh.Count) { return }
-    $timestamps = @(foreach ($band in @('2.4', '5')) {
+    $timestamps = @(foreach ($band in @('2.4', '5', '6')) {
         $recent = $fresh | Where-Object { $_.Band -eq $band -and $_.ObservedAt } |
             Sort-Object ObservedAt -Descending | Select-Object -First 1
         if ($recent) { "$band/$($recent.ObservedAt)" }

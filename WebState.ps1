@@ -116,6 +116,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         startupChecks = $Session.StartupChecks
         hardwareBands = @(Get-WifiBandEvidence @($Session.Points))
         performance = Get-WifiPerformanceSnapshot ([long]$Session.ScanStartedAt) $Now ([int]$Session.ScanFailures)
+        ssidVariations = @(Get-WifiSsidVariations @($Session.Points))
         researchConfidence = Get-WifiResearchConfidence $Session.Research ([int]$Session.NeighborTracker.CompletedSurveys) ([string]$Session.Source) ($Now-[long]$Session.ScanAt)
         longMemory = @($Session.LongHistory | Select-Object -First 30)
         backup = $Session.LastBackup

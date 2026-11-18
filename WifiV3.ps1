@@ -91,7 +91,7 @@ function Get-WifiV3Hypotheses($Summary,$Evolution,[object[]]$HourlyDensity) {
 }
 
 
-// Windows WLAN AutoConfig events are read-only; access may be restricted by policy.
+# Windows WLAN AutoConfig events are read-only; access may be restricted by policy.
 function Get-WifiV3DriverEvents {
     $events=@()
     try {

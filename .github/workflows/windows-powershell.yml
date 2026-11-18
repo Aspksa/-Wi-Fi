@@ -17,6 +17,13 @@ jobs:
       - name: Router identification and diagnostics
         shell: powershell
         run: .\\tests\\RouterDiscovery.Tests.ps1
+      - name: Existing PowerShell regression tests
+        shell: powershell
+        run: |
+          .\\tests\\ChannelWidth.Tests.ps1
+          .\\tests\\Intelligence.Tests.ps1
+          .\\tests\\NativeScan.Tests.ps1
+          .\\tests\\WebState.Tests.ps1
       - name: Existing web tests
         shell: pwsh
         run: node --test tests/WebMap.test.cjs

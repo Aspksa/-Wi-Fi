@@ -1,13 +1,14 @@
-﻿function Start-WifiScanJob([bool] $Active) {
+﻿function Start-WifiScanJob([bool] $Active, [bool] $DiagnosticsOnly = $false) {
     $worker = (Join-Path $PSScriptRoot 'ScanWorker.ps1').Replace("'", "''")
     $monitor = (Join-Path $PSScriptRoot 'Monitor.ps1').Replace("'", "''")
     $native = (Join-Path $PSScriptRoot 'WifiNativeScan.cs').Replace("'", "''")
     $activeFlag = '$' + $Active.ToString().ToLowerInvariant()
+    $diagnosticsFlag = '$' + $DiagnosticsOnly.ToString().ToLowerInvariant()
     $command = @"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 `$ErrorActionPreference = 'Stop'
 try {
-    `$result = & '$worker' '$monitor' '$native' $activeFlag
+    `$result = & '$worker' '$monitor' '$native' $activeFlag $diagnosticsFlag
     if (`$result.Diagnostics.Gateway) { `$result.Diagnostics.Gateway = [string] `$result.Diagnostics.Gateway }
     ConvertTo-Json -InputObject @{ Result = `$result } -Depth 8 -Compress
 } catch {

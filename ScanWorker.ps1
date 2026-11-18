@@ -1,4 +1,4 @@
-﻿param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan)
+﻿param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan, [bool] $DiagnosticsOnly = $false)
 $ErrorActionPreference = 'Stop'
 . $DiagnosticsScript
 
@@ -30,11 +30,23 @@ function Invoke-Netsh([string] $Arguments) {
     }
 }
 
+function Get-DiagnosticsOnlyResult {
+    $diagnostics = try { Get-WifiDiagnostics } catch { $null }
+    [pscustomobject] @{ ScanBlocked = $true; Diagnostics = $diagnostics }
+}
+
+if ($DiagnosticsOnly) { return (Get-DiagnosticsOnlyResult) }
+
+$nativeDenied = $false
 $radio = try {
     if (-not ('WiFi.NativeScanner' -as [type])) { Add-Type -Path $NativeSource -ErrorAction Stop }
     $wait = if ($ActiveScan) { 4000 } else { 0 }
     [WiFi.NativeScanner]::Scan($wait)
-} catch { $null }
+} catch {
+    $errorCause = $_.Exception.GetBaseException()
+    $nativeDenied = $errorCause -is [ComponentModel.Win32Exception] -and $errorCause.NativeErrorCode -eq 5
+    $null
+}
 if ($radio) {
     $diagnostics = try { Get-WifiDiagnostics } catch { $null }
     return [pscustomobject] @{ Native = $radio; Diagnostics = $diagnostics }
@@ -42,10 +54,10 @@ if ($radio) {
 
 $networks = Invoke-Netsh 'wlan show networks mode=bssid'
 $output = $networks.Text + ' ' + $networks.ErrorText
-if ($output -match '(?i)location|местоположени|расположени|access (?:is )?denied|отказано в доступе|elevation|повышени.+прав') {
-    if ($networks.Code -ne 0 -or $networks.Text -notmatch '(?m)^\s*SSID\s+\d+\s*:') {
-        throw 'Windows ограничила доступ. Проверь разрешение на определение местоположения и права учётной записи.'
-    }
+$permissionMessage = $output -match '(?i)location|местоположени|расположени|access (?:is )?denied|отказано в доступе|elevation|повышени.+прав'
+$hasScanRows = $networks.Text -match '(?m)^\s*SSID\s+\d+\s*:'
+if (($permissionMessage -or $nativeDenied) -and ($networks.Code -ne 0 -or -not $hasScanRows)) {
+    return (Get-DiagnosticsOnlyResult)
 }
 if ($output -match '(?i)(?:not running|не запущена|не запущен|no wireless interface|беспроводн\w+ интерфейс\w+ отсутств|нет беспроводн|не найдено беспроводн)') {
     throw 'Адаптер Wi-Fi недоступен. Проверь, включены ли адаптер и служба WLAN.'

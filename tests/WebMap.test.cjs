@@ -98,3 +98,15 @@ test("status detects a server returning the same state for too long", () => {
   assert.match(page.get("startup-check").textContent, /перестала присылать/);
   assert.equal(page.get("connection").lastElementChild.textContent, "Обновления остановились");
 });
+
+test("blocked radio scan leaves the connection dashboard in diagnostics mode", () => {
+  const page = dashboard();
+  page.run(`connected = true;
+    state = { points: [], events: [], health: {adapter:"ready", scan:"blocked", storage:"ready"} };
+    renderStatus();
+    renderLists();`);
+  assert.equal(page.get("connection").lastElementChild.textContent, "Диагностика связи");
+  assert.match(page.get("startup-check").textContent, /Сканирование ограничено Windows/);
+  assert.match(page.get("points").children[0].children[0].textContent, /ограничено Windows/);
+  assert.equal(page.get("notice").hidden, true);
+});

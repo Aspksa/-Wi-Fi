@@ -41,10 +41,13 @@ function Get-WebHeat($History, [datetime] $At, [string] $Band) {
 
 function Get-WebHealth($Session, [long] $Now) {
     $adapter = if ($Session.Issue) { 'unverified' }
+               elseif ($Session.ScanBlocked -and $Session.Diagnostics.AdapterId) { 'ready' }
+               elseif ($Session.ScanBlocked) { 'unverified' }
                elseif ($Session.Source) { 'ready' }
                else { 'pending' }
     $scan = if ($Session.Issue) { 'failed' }
             elseif ($Session.Worker -and $Session.ScanStartedAt -and $Now - $Session.ScanStartedAt -gt 25000) { 'slow' }
+            elseif ($Session.ScanBlocked) { 'blocked' }
             elseif (-not $Session.ScanAt) { 'pending' }
             elseif ($Now - $Session.ScanAt -gt 45000) { 'stale' }
             elseif (-not $Session.Points.Count) { 'empty' }

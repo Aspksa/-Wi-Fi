@@ -35,10 +35,11 @@ function Save-WebMeasurements($Run, [long] $Now) {
 
 function Start-WebScan($Run, [long] $Now, [bool] $Force) {
     if ($Run.Worker) { return }
-    $active = $Force -or ($Now - $Run.LastActive -ge 90000 -and -not $Run.Engine.Incident)
+    $diagnosticsOnly = [bool] ($Run.ScanBlocked -and -not $Force)
+    $active = -not $diagnosticsOnly -and ($Force -or ($Now - $Run.LastActive -ge 90000 -and -not $Run.Engine.Incident))
     $Run.Active = $active
     if ($active) { $Run.LastActive = $Now; $Run.WanSample = $null }
-    try { $Run.Worker = Start-WifiScanJob $active }
+    try { $Run.Worker = Start-WifiScanJob $active $diagnosticsOnly }
     catch {
         $Run.Issue = $_.Exception.GetBaseException().Message
         $Run.Active = $false
@@ -70,6 +71,22 @@ function Set-WebRoute($Run, $Diagnostics) {
 function Receive-WebScan($Run) {
     try {
         $result = Receive-WifiScanJob $Run.Worker
+        $Run.ScanBlocked = [bool] $result.ScanBlocked
+        if ($Run.ScanBlocked) {
+            $Run.Issue = ''
+            $Run.Points = @()
+            $Run.Source = ''
+            $Run.ScanAt = 0L
+            $Run.Plans.Clear()
+            $Run.Streak.Clear()
+            $Run.Forecast = $null
+            foreach ($band in @('2.4', '5')) { $Run.Advice[$band] = 'Для совета нужен снимок эфира.' }
+            $Run.Diagnostics = $result.Diagnostics
+            $Run.Link = Get-LinkState $result.Diagnostics
+            Set-WebRoute $Run $result.Diagnostics
+            Update-WifiRadio $Run.Engine $null (Get-UnixMilliseconds)
+            return
+        }
         if ($result.Native) {
             $connected = @($result.Native.Connected | Where-Object { $_ })
             $Run.Points = @(ConvertFrom-NativeScan $result.Native $Run.HomeName)

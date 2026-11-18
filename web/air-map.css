@@ -43,7 +43,7 @@
 .air-auto, .air-actions .quiet { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 .air-auto[aria-pressed="false"], .air-actions button[aria-pressed="false"] { background: #242923; color: #b8bdad; }
 .air-actions button[aria-pressed="true"] { background: #534022; color: #ffe0a0; }
-.air-volumes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); background: #121713; }
+.air-volumes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: #121713; }
 .air-volume {
   min-width: 0;
   position: relative;
@@ -219,3 +219,5 @@ summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
 }
 .phone-import textarea { width: min(100%, 640px); resize: vertical; }
 .playback output { white-space: normal; }
+
+@media (max-width: 760px) { .air-volumes {grid-template-columns: minmax(0,1fr);} .air-volume + .air-volume {border-left:0;} }

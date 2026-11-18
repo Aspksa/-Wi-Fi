@@ -91,8 +91,10 @@ function renderStatus() {
   const result = connected && !stalled && health ?
     [adapter[health.adapter], scan[health.scan], storage[health.storage]].filter(Boolean).join(" · ") :
     stalled ? "Служба замеров перестала присылать обновления." : "Ожидание ответа службы замеров";
+  const router = state?.router;
+  const routerLine = router?.address ? " · Роутер " + router.address + (router.model ? " · " + router.model : "") + (router.firmware ? " · " + router.firmware : "") + (router.management ? " · панель доступна" : " · панель не подтверждена") : "";
   const check = byId("startup-check");
-  if (check.textContent !== result) check.textContent = result;
+  if (check.textContent !== result + routerLine) check.textContent = result + routerLine;
   const message = [
     actionError,
     !connected ? "Подключение к Wi Fi потеряно. Проверь окно запуска." :

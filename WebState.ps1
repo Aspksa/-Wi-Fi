@@ -90,6 +90,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         now = $Now; scanAt = $Session.ScanAt; scanning = [bool] $Session.Worker
         source = $Session.Source; issue = $Session.Issue; storage = $Session.Storage
         health = Get-WebHealth $Session $Now
+        router = $Session.Router
         home = $Session.HomeName
         tracked = Get-WebPointId $Session.History.Tracked
         trackedName = $Session.History.Tracked.SSID

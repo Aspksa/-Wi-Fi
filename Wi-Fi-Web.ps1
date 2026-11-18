@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -115,9 +115,10 @@ function Receive-WebScan($Run) {
                 At = $Run.ScanAt; Network = [string] $radio.Network; Points = $Run.Points
             })
         }
+        $latencyEvidence = Get-WifiLatencyEvidence @($Run.Engine.Samples) ([string] $radio.Network) (Get-UnixMilliseconds)
         foreach ($band in @('2.4', '5')) {
             $advice = Get-WifiRecommendation $Run.Points $band $connected $at $Run.Link $result.Native $Run.History `
-                $Run.Database $Run.Streak[$band] $Run.Forecast
+                $Run.Database $Run.Streak[$band] $Run.Forecast $latencyEvidence
             $Run.Streak[$band] = $advice.Streak
             $Run.Plans[$band] = $advice.Plan
             $Run.Advice[$band] = $advice.Text
@@ -252,7 +253,7 @@ $run = @{
     HomeName = ''; Points = @(); Spectrum = @(); Plans = @{}; Advice = @{}; Streak = @{}; Latency = @(); Episodes = @()
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
-    NextPrune = 0L
+    NextPrune = 0L; NextRouterCheck = 0L; Router = $null
 }
 $server = $null
 try {
@@ -323,6 +324,11 @@ try {
             $publishAt = 0L
         }
         if ($now -ge $run.NextScan) { Start-WebScan $run $now $false }
+        if ($now -ge $run.NextRouterCheck) {
+            $run.NextRouterCheck = $now + 60000
+            try { $run.Router = Get-WifiRouterInfo $run.Diagnostics }
+            catch { $run.Router = [pscustomobject] @{ address = ''; status = 'unverified'; model = ''; firmware = ''; management = $false; spectrum = 'unverified'; explanation = 'Проверка роутера недоступна.' } }
+        }
         Update-WebProbes $run $now
         if ($now -ge $flushAt) {
             Save-WebMeasurements $run $now

@@ -35,13 +35,15 @@ try {
     Assert (-not $result.entries[0].usable) 'Captured path never classified as usable API'
     Assert ((Get-RouterApiCaptureSummary $path '192.168.0.2').status -eq 'mismatch') 'Reject wrong gateway capture'
 } finally { [IO.Directory]::Delete($folder,$true) }
-$db=[pscustomobject]@{}
+$db=[pscustomobject]@{
+    Rows = @( ,@('2.4|test',6,20,100,30,3,1,8.5))
+    TrialRows = @( ,@(400000L,1,6,1,30,10,2))
+}
 $db | Add-Member ScriptMethod Query { param($sql,$params)
-    if($sql -match 'channel_trials') { return ,@(@(400000L,1,6,1,30,10,2)) }
-    return ,@(@('2.4|test',6,20,100,30,3,1,8.5))
+    if($sql -match 'channel_trials') { return ,$this.TrialRows }
+    return ,$this.Rows
 }
 $history=@(Get-WifiHourlyEfficiency $db $now)
-Write-Host ('Hour rows: '+($history | ConvertTo-Json -Depth 5 -Compress))
 Assert ($history.Count -eq 1 -and $history[0].channel -eq 6 -and $history[0].badPercent -eq 10) 'SQLite hourly aggregates'
 $trials=@(Get-WifiRecentTrials $db $now)
 Assert ($trials.Count -eq 1 -and $trials[0].outcome -eq 'improved') 'Previous manual changes exposed'

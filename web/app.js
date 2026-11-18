@@ -378,6 +378,14 @@ function renderState(next) {
     return [band + " ГГц: " + (top.join("; ") || "нет подтверждённых каналов")];
   });
   byId("router-ranking").textContent = ranking.join(" · ");
+  const scanSummary = state.neighborScan;
+  const summaryBands = (scanSummary?.bands || []).map(band => band.band + " ГГц: " +
+    band.neighbors + " соседних точек · " + (band.channels || []).map(ch =>
+      ch.channel + " (" + ch.networks + ")").join(", "));
+  byId("neighbor-scan-summary").textContent = scanSummary ?
+    "Соседние Wi-Fi-сети: " + scanSummary.neighborCount + " · " +
+    summaryBands.join(" | ") + ". " + scanSummary.explanation :
+    "Ожидание сканирования.";
   byId("router-source-evidence").textContent = state.sourceEvidence?.label || "Источник радиоэфира не определён.";
   byId("router-safety").textContent = state.automation?.reason || "Автоматические изменения отключены.";
   for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {

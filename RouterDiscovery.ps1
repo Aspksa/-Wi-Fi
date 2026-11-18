@@ -42,6 +42,16 @@ function Get-WifiRouterCapabilityHints([string] $Html) {
     }
 }
 
+function Get-WifiRouterAccessState([int] $Code, [string] $Page) {
+    if ($Code -eq 401 -or $Code -eq 403) { return 'login-required' }
+    if ($Code -in @(301,302,303,307,308)) { return 'redirect-unverified' }
+    if ($Code -ne 200) { return 'unverified' }
+    if ($Page -match '(?i)<(?:input|form)[^>]*(?:password|login|signin|auth|logon)') {
+        return 'login-required'
+    }
+    'open-page'
+}
+
 function Get-WifiRouterInfo($Diagnostics) {
     $address = Get-WifiRouterAddress $Diagnostics
     $result = [ordered] @{
@@ -50,58 +60,68 @@ function Get-WifiRouterInfo($Diagnostics) {
         model = ''
         firmware = ''
         management = $false
+        authentication = 'unknown'
+        scheme = ''
+        httpStatus = 0
         spectrum = 'unverified'
         capabilities = Get-WifiRouterCapabilityHints ''
         explanation = 'Шлюз Wi-Fi не определён.'
     }
     if (-not $address) { return [pscustomobject] $result }
-    $result.status = 'unverified'
-    $result.explanation = 'Доступность веб-интерфейса ещё не подтверждена.'
-    $url = 'http://' + $address + '/'
-    try {
-        $request = [Net.HttpWebRequest] [Net.WebRequest]::Create($url)
-        $request.Method = 'GET'
-        $request.Timeout = 1300
-        $request.ReadWriteTimeout = 1300
-        $request.AllowAutoRedirect = $false
-        $request.Proxy = $null
-        $request.UserAgent = 'Wi-Fi local read-only discovery'
-        $response = $request.GetResponse()
-    } catch [Net.WebException] {
-        # Authentication errors still indicate an accessible management service.
-        $response = $_.Exception.Response
-        if (-not $response) {
-            $result.status = 'unreachable'
-            $result.explanation = 'Панель управления не ответила на локальном шлюзе.'
-            return [pscustomobject] $result
-        }
-    } catch {
-        $result.status = 'unreachable'
-        $result.explanation = 'Панель управления не ответила на локальном шлюзе.'
-        return [pscustomobject] $result
-    }
-    try {
-        $code = [int] $response.StatusCode
-        $result.management = $code -in @(200, 301, 302, 303, 307, 308, 401, 403)
-        $result.status = if ($result.management) { 'web-detected' } else { 'unverified' }
-        $result.explanation = 'Веб-интерфейс найден. Для сведений о прошивке может потребоваться вход в панель.'
-        if ($code -eq 200 -and $response.ContentType -match 'text/html') {
-            $stream = $response.GetResponseStream()
-            $reader = New-Object IO.StreamReader($stream)
+    $result.status = 'unreachable'
+    $result.explanation = 'Локальная панель роутера не ответила по HTTP или HTTPS.'
+    # Only the currently selected private IPv4 Wi-Fi gateway, only GET /.
+    # Never follow redirects or accept a different certificate authority silently.
+    foreach ($scheme in @('http','https')) {
+        $response = $null
+        try {
+            $request = [Net.HttpWebRequest] [Net.WebRequest]::Create(('{0}://{1}/' -f $scheme,$address))
+            $request.Method = 'GET'
+            $request.Timeout = 1200
+            $request.ReadWriteTimeout = 1200
+            $request.AllowAutoRedirect = $false
+            $request.Proxy = $null
+            $request.UserAgent = 'Wi-Fi local read-only discovery'
             try {
-                $chars = New-Object char[] 131072
-                $count = $reader.Read($chars, 0, $chars.Length)
-                if ($count -gt 0) {
-                    $identity = Get-WifiRouterIdentity (-join $chars[0..($count - 1)])
-                    $result.model = $identity.Model
-                    $result.firmware = $identity.Firmware
-                    $result.capabilities = Get-WifiRouterCapabilityHints (-join $chars[0..($count - 1)])
-                }
-            } finally { $reader.Dispose() }
+                $response = $request.GetResponse()
+            } catch [Net.WebException] {
+                if ($_.Exception.Response) { $response = $_.Exception.Response }
+                else { continue }
+            }
+            if (-not $response) { continue }
+            $status = [int] $response.StatusCode
+            if ($status -notin @(200,301,302,303,307,308,401,403)) { continue }
+            $result.management = $true
+            $result.scheme = $scheme
+            $result.httpStatus = $status
+            $result.status = 'web-detected'
+            $page = ''
+            if ($status -eq 200 -and [string] $response.ContentType -match 'text/html') {
+                $reader = New-Object IO.StreamReader($response.GetResponseStream())
+                try {
+                    $chars = New-Object char[] 65536
+                    $count = $reader.Read($chars,0,$chars.Length)
+                    if ($count -gt 0) { $page = -join $chars[0..($count-1)] }
+                } finally { $reader.Dispose() }
+            }
+            $result.authentication = Get-WifiRouterAccessState $status $page
+            if ($page) {
+                $identity = Get-WifiRouterIdentity $page
+                $result.model = $identity.Model
+                $result.firmware = $identity.Firmware
+                $result.capabilities = Get-WifiRouterCapabilityHints $page
+            }
+            $result.explanation = switch ($result.authentication) {
+                'login-required' { 'Панель требует авторизацию. Пароль и сеанс не запрашиваются программой.' }
+                'redirect-unverified' { 'Веб-панель перенаправляет на другую страницу. Автопереход отключён.' }
+                default { 'Панель доступна. Внутренний API конкретной прошивки не подтверждён.' }
+            }
+            break
+        } catch {
+            # Discovery must never interrupt Wi-Fi monitoring.
+        } finally {
+            if ($response) { $response.Dispose() }
         }
-        if ($result.model -eq 'RE3L') {
-            $result.explanation = 'RE3L обнаружен по странице управления. Доступ к списку соседних сетей API пока не подтверждён.'
-        }
-    } finally { $response.Dispose() }
+    }
     [pscustomobject] $result
 }

@@ -74,6 +74,8 @@ function ConvertFrom-NativeScan($Result, [string] $HomeName) {
             Signal = $point.Signal; Rssi = $point.Rssi; Frequency = $point.Frequency; RadioWidth = $point.Width
             ObservedAt = $(if ($null -ne $observedAt) { $observedAt } elseif ($Result.Completed) { $Result.FinishedAt })
             Fresh = $fresh; Source = 'WLAN'
+            Capabilities = $point.Capabilities
+            HiddenSsid = [bool]$point.HiddenSsid
             Own = $point.Address -eq $Result.Connected -or ($HomeName -cne '' -and $point.Name -ceq $HomeName)
         }
     }

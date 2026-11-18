@@ -444,6 +444,21 @@ function renderState(next) {
   byId("scan-performance").textContent = "Процесс: память " + (perf.processWorkingSetMb ?? "—") +
     " МБ · CPU накопленно " + (perf.cpuSeconds ?? "—") + " сек" +
     " · скан " + (perf.scanElapsedMs ?? 0) + " мс";
+  const research = state.researchConfidence || {};
+  byId("scan-memory").textContent = "Долговременная память: " +
+    (state.longMemory?.length || 0) + " сохранённых суточных рядов · оценка " +
+    (research.level || "низкая") + " · независимых сканов " + (research.independentScans ?? 0);
+  byId("scan-backup").textContent = "Резервирование SQLite: " +
+    (state.backup?.status || "ожидание") + (state.backup?.note ? " · " + state.backup.note : "") +
+    " · локальный отчёт " + (state.report?.at ? new Date(state.report.at).toLocaleString("ru-RU") : "ожидание");
+  byId("scan-investigation").textContent = "Расследования: " + (research.incidents?.length || 0) +
+    " · аномалий BSSID " + (research.anomalies?.length || 0) +
+    " · источник " + (research.source || "не подтверждён") +
+    " · выводы требуют независимых проб.";
+  byId("scan-alerts").textContent = research.alerts?.length ?
+    "Диагностика: " + research.alerts.slice(0,3).map(a => a.kind + " · " +
+      new Date(a.at).toLocaleTimeString("ru-RU")).join("; ") :
+    "Уведомления: значимых событий пока нет.";
   const adapter = state.adapterSummary || {};
   byId("scan-adapter").textContent = "Wi-Fi-адаптер: " + (adapter.name || "не определён") +
     " · " + (adapter.description || "модель не определена") +

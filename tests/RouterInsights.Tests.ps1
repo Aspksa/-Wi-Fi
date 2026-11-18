@@ -47,4 +47,26 @@ $history=@(Get-WifiHourlyEfficiency $db $now)
 Assert ($history.Count -eq 1 -and $history[0].channel -eq 6 -and $history[0].badPercent -eq 10) 'SQLite hourly aggregates'
 $trials=@(Get-WifiRecentTrials $db $now)
 Assert ($trials.Count -eq 1 -and $trials[0].outcome -eq 'improved') 'Previous manual changes exposed'
+. (Join-Path $root 'Database.ps1')
+$folderSql=Join-Path ([IO.Path]::GetTempPath()) ('wifi-v21-sqlite-'+[guid]::NewGuid().ToString('N'))
+[void][IO.Directory]::CreateDirectory($folderSql)
+$realDb=$null
+try {
+    $realDb=Open-WifiDatabase (Join-Path $folderSql 'insights.sqlite')
+    $current=[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $bucket=[long][Math]::Floor($current / 3600000.0)*3600000L - 3600000L
+    foreach($i in @(1,2,3)) {
+        [void]$realDb.Query('INSERT INTO samples(session_id,at_ms,network,channel,width_mhz,lan,lan_loss) VALUES(?,?,?,?,?,?,?)',
+            @('v21-test',($bucket+$i*1000),'2.4|test',6,20,$(if($i -eq 1){50}else{5}),0))
+    }
+    [void]$realDb.Query('INSERT INTO channel_trials(id,at_ms,network,old_channel,new_channel,improved,before_bad,after_bad,pairs) VALUES(?,?,?,?,?,?,?,?,?)',
+        @('v21-trial',($current-300000L),'2.4|test',1,6,1,10,2,30))
+    $realHourly=@(Get-WifiHourlyEfficiency $realDb $current)
+    Assert ($realHourly.Count -ge 1 -and $realHourly[0].samples -eq 3 -and $realHourly[0].badPercent -eq 33.3) 'Real SQLite hourly aggregation'
+    $realTrials=@(Get-WifiRecentTrials $realDb $current)
+    Assert ($realTrials.Count -eq 1 -and $realTrials[0].outcome -eq 'improved') 'Real SQLite trial history'
+} finally {
+    if($realDb){$realDb.Dispose()}
+    [IO.Directory]::Delete($folderSql,$true)
+}
 'Router v2.1 insights checks passed'

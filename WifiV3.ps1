@@ -89,3 +89,32 @@ function Get-WifiV3Hypotheses($Summary,$Evolution,[object[]]$HourlyDensity) {
         automaticChanges=$false
     }
 }
+
+
+// Windows WLAN AutoConfig events are read-only; access may be restricted by policy.
+function Get-WifiV3DriverEvents {
+    $events=@()
+    try {
+        $records=@(Get-WinEvent -FilterHashtable @{
+            LogName='Microsoft-Windows-WLAN-AutoConfig/Operational'
+            StartTime=(Get-Date).AddHours(-12)
+        } -MaxEvents 30 -ErrorAction Stop)
+        foreach($entry in @($records | Select-Object -First 8)) {
+            $events += [pscustomobject]@{
+                id=[int]$entry.Id
+                at=$entry.TimeCreated.ToString('s')
+                provider=[string]$entry.ProviderName
+                note='WLAN AutoConfig event; inspect locally for details'
+            }
+        }
+    } catch {
+        return [pscustomobject]@{
+            status='unavailable';count=0;events=@()
+            note='WLAN AutoConfig журнал недоступен или пуст; доступ определяется настройками Windows.'
+        }
+    }
+    [pscustomobject]@{
+        status='read-only';count=$events.Count;events=@($events)
+        note='События журнала Windows сами по себе не доказывают аппаратную неисправность или причину обрыва.'
+    }
+}

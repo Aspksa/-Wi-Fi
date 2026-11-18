@@ -94,6 +94,10 @@ function Get-SignalFootprint([string] $Band, [int] $Channel, $Point) {
             Width = $width; Secondary = $Point.RadioWidth.SecondaryCenter; Measured = $true
         }
     }
+    if ($Band -eq '6') {
+        $primary = if ($Channel -eq 2) { 5935 } else { 5950 + $Channel * 5 }
+        return [pscustomobject] @{ Primary=$primary; Left=$primary-10; Right=$primary+10; Width=20; Measured=$false }
+    }
     if ($Band -eq '2.4') {
         $primary = if ($Channel -eq 14) { 2484 } else { 2407 + $Channel * 5 }
         return [pscustomobject] @{ Primary = $primary; Left = $primary - 10; Right = $primary + 10; Width = 20 }

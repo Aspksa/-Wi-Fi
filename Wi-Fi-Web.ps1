@@ -298,14 +298,14 @@ $run = @{
     RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
-    Automation = Get-Re3lSafeWritePolicy $null $null
+    Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
 try {
     $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Wi Fi'
     $legacy = Join-Path $folder 'history.json'
     $run.RouterTelemetryPath = Join-Path $folder 'router-telemetry.json'
-    $run.ApiCapturePath = Join-Path $folder 're3l-api-capture.json'
+    # No firmware research is required for normal operation.
     try {
         $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
         $run.HomeName = [string] (Get-DatabaseSetting $run.Database 'home_ssid')
@@ -382,7 +382,7 @@ try {
         if ($now -ge $run.NextRouterCheck) {
             $run.NextRouterCheck = $now + 60000
             try { $run.Router = Get-WifiRouterInfo $run.Diagnostics }
-            catch { $run.Router = [pscustomobject] @{ address = ''; status = 'unverified'; model = ''; firmware = ''; management = $false; spectrum = 'unverified'; explanation = 'Проверка роутера недоступна.' } }
+            catch { $run.Router = [pscustomobject] @{ address = ''; status = 'unknown'; reachable = $false; explanation = 'Проверка шлюза недоступна.' } }
         }
         if ($now -ge $run.NextRouterTelemetry) {
             $run.NextRouterTelemetry = $now + 5000
@@ -407,7 +407,7 @@ try {
             $run.NextInsights = $now + 15000
             try {
                 $gateway = Get-WifiRouterAddress $run.Diagnostics
-                $run.ApiCapture = Get-RouterApiCaptureSummary $run.ApiCapturePath $gateway
+                $run.ApiCapture = $null
                 $run.Trend = Get-WifiTrendSignal @($run.Engine.Samples) ([string]$run.Engine.Radio.Network) $now
                 if ($run.Database) {
                     $run.HourlyEfficiency = @(Get-WifiHourlyEfficiency $run.Database $now)
@@ -421,7 +421,7 @@ try {
         # Guardrails cannot trigger router writes; they only annotate the existing advice.
         try {
             $run.SourceEvidence = Get-WifiObservedSource $run.Source $run.RouterTelemetry $now
-            $run.CaptureAssessment = Get-Re3lCaptureAssessment $run.ApiCapture ([string]$run.Router.firmware)
+            $run.CaptureAssessment = $null
             $run.RecommendationGuards.Clear()
             foreach ($band in @('2.4','5')) {
                 $latency = Get-WifiLatencyEvidence @($run.Engine.Samples) ([string]$run.Engine.Radio.Network) $now

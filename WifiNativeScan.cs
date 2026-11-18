@@ -117,7 +117,7 @@ namespace WiFi
             if (error != 0) { throw new Win32Exception((int)error); }
         }
 
-        private static Guid FindInterface(IntPtr client)
+        private static Guid FindInterface(IntPtr client, Guid preferred)
         {
             IntPtr list;
             Check(WlanEnumInterfaces(client, IntPtr.Zero, out list));
@@ -133,10 +133,11 @@ namespace WiFi
                     int state = Marshal.ReadInt32(entry, 528);
                     if (state != ConnectedState && state != DisconnectedState) { continue; }
                     Guid id = (Guid)Marshal.PtrToStructure(entry, typeof(Guid));
+                    if (preferred != Guid.Empty) { if (id == preferred) { return id; } else { continue; } }
                     if (state == ConnectedState) { return id; }
                     if (candidate == Guid.Empty) { candidate = id; }
                 }
-                if (candidate == Guid.Empty) { throw new IOException("No active WLAN adapter."); }
+                if (candidate == Guid.Empty) { throw new IOException(preferred == Guid.Empty ? "No active WLAN adapter." : "Selected WLAN adapter not available."); }
                 return candidate;
             }
             finally
@@ -169,8 +170,13 @@ namespace WiFi
             }
         }
 
-        public static RadioScan Scan(int timeoutMilliseconds)
+        public static RadioScan Scan(int timeoutMilliseconds) { return Scan(timeoutMilliseconds, null); }
+
+        public static RadioScan Scan(int timeoutMilliseconds, string preferredAdapter)
         {
+            Guid preferred = Guid.Empty;
+            if (!String.IsNullOrWhiteSpace(preferredAdapter) && !Guid.TryParse(preferredAdapter, out preferred))
+            { throw new ArgumentException("Invalid WLAN adapter ID."); }
             if (timeoutMilliseconds < 0 || timeoutMilliseconds > 4000) { throw new ArgumentOutOfRangeException("timeoutMilliseconds"); }
             IntPtr client;
             uint version;
@@ -179,7 +185,7 @@ namespace WiFi
             ScanCallback callback = null;
             try
             {
-                Guid selected = FindInterface(client);
+                Guid selected = FindInterface(client, preferred);
                 Guid adapter = selected;
                 bool completed = false;
                 if (timeoutMilliseconds > 0)
@@ -244,6 +250,9 @@ namespace WiFi
                 band = "2.4";
                 return (frequency - 2407) / 5;
             }
+            if (frequency == 5935) { band = "6"; return 2; }
+            if (frequency >= 5955 && frequency <= 7115 && (frequency - 5950) % 5 == 0)
+            { band = "6"; return (frequency - 5950) / 5; }
             if (frequency >= 5160 && frequency <= 5885 && frequency % 5 == 0)
             {
                 band = "5";
@@ -343,13 +352,14 @@ namespace WiFi
         private static int SegmentFrequency(string band, int channel)
         {
             if (channel == 0) { return 0; }
-            return band == "2.4" ? (channel == 14 ? 2484 : 2407 + 5 * channel) : 5000 + 5 * channel;
+            return band == "2.4" ? (channel == 14 ? 2484 : 2407 + 5 * channel) :
+                band == "6" ? (channel == 2 ? 5935 : 5950 + 5 * channel) : 5000 + 5 * channel;
         }
 
         private static RadioWidth Footprint(string band, int primary, int width, int center, int second)
         {
-            int lower = band == "2.4" ? 2400 : 5150;
-            int upper = band == "2.4" ? 2500 : 5900;
+            int lower = band == "2.4" ? 2400 : (band == "6" ? 5925 : 5150);
+            int upper = band == "2.4" ? 2500 : (band == "6" ? 7125 : 5900);
             if (center - width / 2 < lower || center + width / 2 > upper ||
                 Math.Abs(primary - center) >= width / 2 || (primary - center + width / 2) % 20 != 10) { return null; }
             if (band == "2.4" && width == 40 &&
@@ -361,7 +371,7 @@ namespace WiFi
 
         public static RadioWidth DecodeWidth(byte[] elements, string band, int channel, int frequency)
         {
-            if (elements == null || (band != "2.4" && band != "5")) { return null; }
+            if (elements == null || (band != "2.4" && band != "5" && band != "6")) { return null; }
             RadioWidth ht = null, vht = null, eht = null;
             for (int i = 0; i + 1 < elements.Length;)
             {

@@ -91,6 +91,9 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         source = $Session.Source; issue = $Session.Issue; storage = $Session.Storage
         health = Get-WebHealth $Session $Now
         router = $Session.Router
+        routerTelemetry = $(if ($Session.RouterTelemetry) { [pscustomobject] @{ source = $Session.RouterTelemetry.source; capturedAt = $Session.RouterTelemetry.capturedAt; airtime = @($Session.RouterTelemetry.airtime); verifiedLive = $false } })
+        automation = $Session.Automation
+        evidence = $Session.Evidence
         home = $Session.HomeName
         tracked = Get-WebPointId $Session.History.Tracked
         trackedName = $Session.History.Tracked.SSID

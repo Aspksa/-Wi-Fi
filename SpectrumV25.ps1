@@ -85,10 +85,12 @@ ORDER BY at_ms DESC LIMIT 240
     $groups=@{}
     foreach($row in @($rows)) {
         try {
-            $points=@(ConvertFrom-Json -InputObject ([string]$row[1]) -ErrorAction Stop)
+            $decoded=ConvertFrom-Json -InputObject ([string]$row[1]) -ErrorAction Stop
+            $points=@($decoded | ForEach-Object { $_ })
             foreach($band in @('2.4','5')) {
                 $neighbors=@($points | Where-Object {$_.Band -eq $band -and -not $_.Own -and $_.Fresh -ne $false -and $_.BSSID} |
                     Group-Object BSSID)
+                if (-not $neighbors.Count) {continue}
                 $key='{0}|{1}' -f $row[0],$band
                 if(-not $groups.ContainsKey($key)) {
                     $groups[$key]=[pscustomobject]@{

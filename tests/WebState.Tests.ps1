@@ -62,8 +62,8 @@ $run.Episodes = @((Get-WebEpisode @{
     Id='probe-1'; At=195000L; Ended=196000L; Network='5|mesh'; Cause='local-overlap'; Message='Скачок'
 }))
 $projection = Get-WebState $run (Get-UnixMilliseconds) $now
-Assert ($projection.bands[1].preview.confirmed -and $projection.bands[1].preview.width -eq 80 -and
-    $projection.bands[1].preview.segments.Count -gt 0) 'The browser receives the confirmed candidate geometry'
+Assert (-not $projection.bands[1].preview.confirmed -and $projection.bands[1].preview.width -eq 80 -and
+    $projection.bands[1].preview.segments.Count -gt 0) 'Browser gets geometry but withholds confirmation without independent scan evidence'
 Assert ($projection.episodes[0].band -eq '5' -and $projection.episodes[0].route -eq 'router') 'Archived WLAN evidence identifies the correct radio'
 $externalEpisode = Get-WebEpisode @{ Id='wan'; At=195500L; Network='2.4|mesh'; Cause='upload'; Message='Внешняя задержка' }
 Assert ($externalEpisode.route -eq 'external') 'External episodes keep their route classification'

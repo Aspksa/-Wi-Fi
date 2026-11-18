@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -66,6 +66,12 @@ function Set-WebRoute($Run, $Diagnostics) {
     $Run.WanSample = $null
     $Run.Traffic = $null
     $Run.Latency = @()
+    $Run.Router = $null
+    $Run.RouterTelemetry = $null
+    $Run.ApiCapture = $null
+    $Run.NextRouterCheck = 0L
+    $Run.NextRouterTelemetry = 0L
+    $Run.NextInsights = 0L
 }
 
 function Use-WebRouterFallback($Run, [long] $Now) {
@@ -286,13 +292,16 @@ $run = @{
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
-    RouterTelemetryPath = ''; Evidence = @{}; Quality = @{}; Automation = Get-RouterAutomationPolicy $null $null
+    RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
+    Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
+    Automation = Get-RouterAutomationPolicy $null $null
 }
 $server = $null
 try {
     $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Wi Fi'
     $legacy = Join-Path $folder 'history.json'
     $run.RouterTelemetryPath = Join-Path $folder 'router-telemetry.json'
+    $run.ApiCapturePath = Join-Path $folder 're3l-api-capture.json'
     try {
         $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
         $run.HomeName = [string] (Get-DatabaseSetting $run.Database 'home_ssid')
@@ -357,6 +366,14 @@ try {
             }
             $publishAt = 0L
         }
+        if ($run.Worker -and $run.ScanStartedAt -and $now - $run.ScanStartedAt -gt 27000) {
+            try { Close-WifiScanJob $run.Worker } catch { }
+            $run.Worker = $null
+            $run.Active = $false
+            $run.ScanStartedAt = 0L
+            $run.NextScan = $now + 10000
+            $run.Issue = 'Сканирование не ответило. Перезапускаю проверку автоматически.'
+        }
         if ($now -ge $run.NextScan) { Start-WebScan $run $now $false }
         if ($now -ge $run.NextRouterCheck) {
             $run.NextRouterCheck = $now + 60000
@@ -382,6 +399,21 @@ try {
             }
         }
         Update-WebProbes $run $now
+        if ($now -ge $run.NextInsights) {
+            $run.NextInsights = $now + 15000
+            try {
+                $gateway = Get-WifiRouterAddress $run.Diagnostics
+                $run.ApiCapture = Get-RouterApiCaptureSummary $run.ApiCapturePath $gateway
+                $run.Trend = Get-WifiTrendSignal @($run.Engine.Samples) ([string]$run.Engine.Radio.Network) $now
+                if ($run.Database) {
+                    $run.HourlyEfficiency = @(Get-WifiHourlyEfficiency $run.Database $now)
+                    $run.RecentTrials = @(Get-WifiRecentTrials $run.Database $now)
+                }
+            } catch {
+                # Telemetry failures are isolated from the ping and scan loop.
+                $run.Trend = [pscustomobject] @{ status='unavailable'; reason='Не удалось обработать статистику измерений.' }
+            }
+        }
         if ($now -ge $flushAt) {
             Save-WebMeasurements $run $now
             $flushAt = $now + 10000

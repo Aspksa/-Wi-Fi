@@ -25,6 +25,8 @@ Assert ($tracker.Changes.Count -eq 1 -and $tracker.Changes[0].localProblemsNearb
 Assert (-not (Update-WifiRoamTracker $tracker 'aa:bb:cc:dd:ee:03' 'Home' 120000L $true @())) 'Repeated scan cannot replay roam'
 $hyp=Get-WifiV3Hypotheses $summary @{volatile=1} @()
 Assert ($hyp.status -eq 'hypotheses' -and -not $hyp.automaticChanges) 'Research suggestions remain observational'
+$log=Get-WifiV3DriverEvents
+Assert ($log.status -in @('read-only','unavailable') -and $log.count -le 8) 'Bounded and read-only WLAN event diagnostics'
 $monitor=Get-WifiV3CaptureCapabilities
 Assert (-not $monitor.captureEnabled) 'Monitor mode never enabled automatically'
 # Construct safe offline libpcap with a single 802.11 beacon frame, 802.11 linktype=105.

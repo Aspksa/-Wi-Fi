@@ -88,6 +88,17 @@
               <canvas id="waterfall-5" role="img" aria-label="Интенсивность сигналов по каналам 5 ГГц в последних сканированиях"></canvas>
             </div>
           </div>
+          <div class="spectrum-band">
+            <div class="band-heading"><h3>6 <small>ГГц</small></h3><p id="band-6">Ожидание аппаратных наблюдений</p></div>
+            <div class="plot-wrap">
+              <canvas id="spectrum-6" class="spectrum-plot" tabindex="0" aria-label="Наблюдаемые каналы 6 ГГц; доступность зависит от Wi-Fi-адаптера и Windows."></canvas>
+              <p class="tooltip" id="tip-6" hidden></p>
+            </div>
+            <div class="waterfall">
+              <span>История обнаруженных сигналов (не спектральная загрузка)</span>
+              <canvas id="waterfall-6" role="img" aria-label="История видимых точек 6 ГГц"></canvas>
+            </div>
+          </div>
         </div>
         <div class="spectrum-toolbar">
           <div class="point-focus">
@@ -129,6 +140,10 @@
             <div class="air-volume">
               <div class="volume-label"><h3>5 <small>ГГц</small></h3><span>Глубина — время</span></div>
               <canvas id="air-volume-5" role="img" aria-label="Объёмная история сигналов в диапазоне 5 ГГц"></canvas>
+            </div>
+            <div class="air-volume">
+              <div class="volume-label"><h3>6 <small>ГГц</small></h3><span>Только наблюдения драйвера</span></div>
+              <canvas id="air-volume-6" role="img" aria-label="Объёмная история точек доступа 6 ГГц, если поддерживается адаптером"></canvas>
             </div>
           </div>
           <div class="air-tools">

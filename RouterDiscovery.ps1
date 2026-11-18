@@ -28,6 +28,20 @@ function Get-WifiRouterIdentity([string] $Html) {
     [pscustomobject] @{ Model = $model; Firmware = $firmware }
 }
 
+function Get-WifiRouterCapabilityHints([string] $Html) {
+    # Informational only. Strings in HTML do not prove functional API support.
+    $scanHint = [bool] ($Html -match '(?i)(?:site survey|wireless survey|neighbor(?:ing)? (?:ap|network)|wifi scan|scan wifi|扫描|周边网络)')
+    $channelHint = [bool] ($Html -match '(?i)(?:channel width|wireless channel|wifi channel|信道|канал)')
+    $radioHint = [bool] ($Html -match '(?i)(?:channel utilization|airtime|radio statistics|channel busy|信道利用率)')
+    [pscustomobject] @{
+        scan = $(if ($scanHint) { 'interface-hint' } else { 'not-confirmed' })
+        channel = $(if ($channelHint) { 'interface-hint' } else { 'not-confirmed' })
+        radio = $(if ($radioHint) { 'interface-hint' } else { 'not-confirmed' })
+        write = 'not-confirmed'
+        rollback = 'not-confirmed'
+    }
+}
+
 function Get-WifiRouterInfo($Diagnostics) {
     $address = Get-WifiRouterAddress $Diagnostics
     $result = [ordered] @{
@@ -37,6 +51,7 @@ function Get-WifiRouterInfo($Diagnostics) {
         firmware = ''
         management = $false
         spectrum = 'unverified'
+        capabilities = Get-WifiRouterCapabilityHints ''
         explanation = 'Шлюз Wi-Fi не определён.'
     }
     if (-not $address) { return [pscustomobject] $result }
@@ -80,6 +95,7 @@ function Get-WifiRouterInfo($Diagnostics) {
                     $identity = Get-WifiRouterIdentity (-join $chars[0..($count - 1)])
                     $result.model = $identity.Model
                     $result.firmware = $identity.Firmware
+                    $result.capabilities = Get-WifiRouterCapabilityHints (-join $chars[0..($count - 1)])
                 }
             } finally { $reader.Dispose() }
         }

@@ -1,4 +1,4 @@
-﻿param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan, [bool] $DiagnosticsOnly = $false)
+﻿param([string] $DiagnosticsScript, [string] $NativeSource, [bool] $ActiveScan, [bool] $DiagnosticsOnly = $false, [string]$AdapterId = '')
 $ErrorActionPreference = 'Stop'
 . $DiagnosticsScript
 
@@ -41,10 +41,11 @@ $nativeDenied = $false
 $radio = try {
     if (-not ('WiFi.NativeScanner' -as [type])) { Add-Type -Path $NativeSource -ErrorAction Stop }
     $wait = if ($ActiveScan) { 4000 } else { 0 }
-    [WiFi.NativeScanner]::Scan($wait)
+    [WiFi.NativeScanner]::Scan($wait,$AdapterId)
 } catch {
     $errorCause = $_.Exception.GetBaseException()
     $nativeDenied = $errorCause -is [ComponentModel.Win32Exception] -and $errorCause.NativeErrorCode -eq 5
+    if ($AdapterId -and -not $nativeDenied) {throw ('Выбранный адаптер недоступен: ' + $errorCause.Message)}
     $null
 }
 if ($radio) {

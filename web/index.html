@@ -36,6 +36,8 @@
         <h1 id="page-title">Живой эфир</h1>
         <p id="startup-check" class="startup-check" role="status">Проверка адаптера, замеров и SQLite</p>
         <p id="scan-meta" class="subtext">Ожидание первого замера</p>
+        <label for="wifi-adapter-select">Встроенный Wi-Fi-адаптер</label>
+        <select id="wifi-adapter-select" aria-label="Выбор Wi-Fi-адаптера"><option value="">Автоматический выбор</option></select>
       </div>
       <svg class="wave-plate" viewBox="0 0 445 110" aria-hidden="true"><defs><linearGradient id="ink"><stop stop-color="#be9558" stop-opacity="0"/><stop offset=".36" stop-color="#edc581"/><stop offset=".68" stop-color="#a6bcb2"/><stop offset="1" stop-color="#61756f" stop-opacity="0"/></linearGradient></defs><g fill="none" stroke="url(#ink)" stroke-width=".85"><path d="M0 29 C75 37 94 3 132 10 S196 115 237 88 S308 -18 351 23 S404 76 445 44"/>
 <path d="M0 32 C75 40 94 5 132 13 S196 113 237 86 S308 -17 351 25 S404 77 445 46"/>
@@ -180,6 +182,10 @@
       <p id="neighbor-evolution" class="router-ranking">История наблюдений: ожидаются завершённые сканирования.</p>
       <p id="scan-permissions" class="router-ranking">Проверка разрешений Windows.</p>
       <p id="scan-adapter" class="router-ranking">Проверка Wi-Fi-адаптера.</p>
+      <p id="scan-recovery" class="router-ranking">Автовосстановление: ожидание.</p>
+      <p id="scan-bands" class="router-ranking">Поддержка частот: проверка наблюдений.</p>
+      <p id="scan-startup" class="router-ranking">Самотест при запуске: ожидание.</p>
+      <p id="scan-performance" class="router-ranking">Нагрузка приложения: ожидание.</p>
       <p id="scan-confidence" class="router-ranking">Проверка свежести сканирования.</p>
       <p id="scan-interference" class="router-ranking">Оценка силы соседних помех.</p>
       <p id="neighbor-stability" class="router-ranking">Анализ динамики сигнала соседей.</p>

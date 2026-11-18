@@ -31,7 +31,7 @@ function Restore-WifiVerifiedBackup([string]$BackupPath,[string]$DatabasePath,[s
                 throw 'Проверка временной копии не прошла.'
             }
         }finally{$fresh.Dispose()}
-        if($originalExists){[IO.File]::Replace($tmp,$DatabasePath,$null)}
+        if($originalExists){[IO.File]::Replace($tmp,$DatabasePath,(Join-Path $rollback ($file+'.replaced')))}
         else{[IO.File]::Move($tmp,$DatabasePath)}
         foreach($suffix in @('-wal','-shm')){
             if([IO.File]::Exists($DatabasePath+$suffix)){[IO.File]::Delete($DatabasePath+$suffix)}

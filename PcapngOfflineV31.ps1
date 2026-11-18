@@ -17,6 +17,7 @@ function Read-WifiPcapng([string]$Path,[int]$MaxRecords=3000){
         $end=$reader.ReadUInt32()
         if($end -ne $length -or [BitConverter]::ToUInt32($body,0) -ne 0x1A2B3C4D){throw 'Нужен корректный little-endian PCAPNG.'}
         $interfaces=@()
+        $firstLink=0
         $count=0
         while($inputStream.Position+12 -le $inputStream.Length -and $count -lt $MaxRecords){
             $type=$reader.ReadUInt32()
@@ -38,12 +39,13 @@ function Read-WifiPcapng([string]$Path,[int]$MaxRecords=3000){
             $link=$interfaces[$iface]
             if($link -notin @(105,127)){continue}
             if(-not $writer){
+                $firstLink=$link
                 $output=[IO.File]::Open($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write)
                 $writer=[IO.BinaryWriter]::new($output)
                 $writer.Write([byte[]]@(0xd4,0xc3,0xb2,0xa1,2,0,4,0,0,0,0,0,0,0,0,0,255,255,0,0))
                 $writer.Write([uint32]$link)
             }
-            if($link -ne [int][BitConverter]::ToUInt32([IO.File]::ReadAllBytes($temporary),20)){continue}
+            if($link -ne $firstLink){continue}
             $writer.Write([byte[]]::new(8))
             $writer.Write([uint32]$captured)
             $writer.Write([uint32]$captured)

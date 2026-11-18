@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1', 'WifiReliabilityV31.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1', 'WifiReliabilityV31.ps1', 'WifiLongMemoryV31.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -26,6 +26,7 @@ function Save-WebMeasurements($Run, [long] $Now) {
             Save-Intelligence $Run.Database $engine
         }
         if ($Now -ge $Run.NextPrune) {
+            Update-WifiLongMemory $Run.Database $Now
             Remove-ExpiredMeasurements $Run.Database $Now
             $Run.NextPrune = $Now + 3600000
         }
@@ -324,6 +325,7 @@ $run = @{
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
     Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null; WlanEvents=$null
     Recovery=New-WifiRecoveryState; SelectedAdapter=''; AdapterInventory=@(); StartupChecks=$null; Alert=$null
+    NextBackup=0L; LastBackup=$null; LongHistory=@()
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -331,6 +333,7 @@ try {
     $folder = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Wi Fi'
     $legacy = Join-Path $folder 'history.json'
     $run.RouterTelemetryPath = Join-Path $folder 'router-telemetry.json'
+    $run.BackupFolder=Join-Path $folder 'backups'
     # No firmware research is required for normal operation.
     try {
         $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
@@ -456,6 +459,7 @@ try {
                     $run.HourlyEfficiency = @(Get-WifiHourlyEfficiency $run.Database $now)
                     $run.RecentTrials = @(Get-WifiRecentTrials $run.Database $now)
                     $run.HourlyNeighbors = @(Get-WifiHourlyNeighborDensity $run.Database $now @($run.HourlyEfficiency))
+                    $run.LongHistory = @(Get-WifiHistoricalQuality $run.Database)
                 }
             } catch {
                 # Telemetry failures are isolated from the ping and scan loop.
@@ -477,6 +481,10 @@ try {
         }
         if ($now -ge $flushAt) {
             Save-WebMeasurements $run $now
+            if($run.Database -and $now -ge $run.NextBackup){
+                $run.LastBackup=Save-WifiVerifiedBackup $run.Database $run.BackupFolder $now
+                $run.NextBackup=$now+18000000
+            }
             $flushAt = $now + 10000
         }
         if ($now -ge $publishAt) {

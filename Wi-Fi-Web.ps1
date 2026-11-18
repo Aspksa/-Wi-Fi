@@ -398,10 +398,16 @@ try {
                 'adapter' {
                     $known=@($run.AdapterInventory | Where-Object {$_.id -eq $command.Value})
                     if(-not $command.Value -or $known.Count) {
+                        if($run.Worker){Close-WifiScanJob $run.Worker;$run.Worker=$null}
+                        $run.Active=$false
                         $run.SelectedAdapter=[string]$command.Value
+                        $run.Points=@();$run.Source='';$run.ScanAt=0L
+                        $run.NativeCompleted=$false
                         $run.NeighborTracker=New-WifiNeighborTracker
                         $run.Roaming=New-WifiRoamTracker
+                        $run.Research=New-WifiResearchMemory
                         $run.Plans.Clear();$run.Streak.Clear()
+                        $run.Spectrum=@()
                         Start-WebScan $run $now $true
                     }
                 }

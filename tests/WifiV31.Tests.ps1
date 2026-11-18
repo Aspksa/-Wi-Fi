@@ -3,6 +3,7 @@ $root=Split-Path -Parent $PSScriptRoot
 . (Join-Path $root 'WifiReliabilityV31.ps1')
 . (Join-Path $root 'WifiResearchV31.ps1')
 . (Join-Path $root 'WifiLongMemoryV31.ps1')
+. (Join-Path $root 'WifiRestoreV31.ps1')
 . (Join-Path $root 'Database.ps1')
 . (Join-Path $root 'PcapOffline.ps1')
 . (Join-Path $root 'PcapngOfflineV31.ps1')
@@ -52,6 +53,15 @@ try {
     $backup=Save-WifiVerifiedBackup $db (Join-Path $folder 'backups') $now
     Assert ($backup.status -eq 'verified') 'Consistent online backup and integrity check'
     Assert (@(Get-ChildItem (Join-Path $folder 'backups') -Filter '*.sqlite').Count -eq 1) 'Backup file persisted'
+    [void]$db.Query('INSERT INTO samples(session_id,at_ms,network,channel,lan,lan_loss) VALUES(?,?,?,?,?,?)',
+        @('post-backup',($yesterday+7*3600000),'5|home',36,2,0))
+    $db.Dispose();$db=$null
+    $saved=(Get-ChildItem (Join-Path $folder 'backups') -Filter 'wifi-*.sqlite' | Select-Object -First 1).FullName
+    $restored=Restore-WifiVerifiedBackup $saved (Join-Path $folder 'wifi.sqlite') (Join-Path $folder 'rollback')
+    Assert ($restored.status -eq 'restored' -and (Test-Path $restored.rollbackFolder)) 'Verified offline restoration retains original'
+    $db=Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
+    $count=[long]$db.Query("SELECT COUNT(*) FROM samples WHERE session_id='post-backup'",@())[0][0]
+    Assert ($count -eq 0) 'Offline restore returns to exact backed-up state'
     $report=Save-WifiLocalReport (Join-Path $folder 'reports') ([pscustomobject]@{label='<script>alert(1)</script>';count=1}) $now
     Assert ((Test-Path $report.json) -and (Test-Path $report.html)) 'Local HTML and JSON created'
     Assert ((Get-Content $report.html -Raw) -notmatch '<script>alert') 'HTML report escapes untrusted values'

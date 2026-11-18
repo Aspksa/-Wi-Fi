@@ -23,6 +23,10 @@ function ConvertTo-WebPoint($Point, $Tracked) {
         ehtAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Eht)
         p2pAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.WifiDirect)
         rsnAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Rsn)
+        rsnVersion = $(if($Point.Capabilities){$Point.Capabilities.RsnVersion})
+        unknownIeCount = $(if($Point.Capabilities){[int]$Point.Capabilities.UnknownElements}else{0})
+        heOperation = [bool]($Point.Capabilities -and $Point.Capabilities.HeOperation)
+        ehtOperation = [bool]($Point.Capabilities -and $Point.Capabilities.EhtOperation)
         own = [bool] $Point.Own
         stale = $Point.Fresh -eq $false
         tracked = $Tracked -and $Tracked.BSSID -eq $Point.BSSID -and $Tracked.Band -eq $Point.Band

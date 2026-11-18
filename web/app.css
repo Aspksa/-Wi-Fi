@@ -172,3 +172,6 @@ tr.stale { color: var(--dim); }
 .router-v21 h3{font-size:.85rem;font-weight:600;margin:0 0 9px}
 .router-v21-note,.router-v21-history{border:1px solid var(--line,#34392e);border-radius:8px;padding:10px 12px;color:var(--muted,#a7afa5);font-size:.82rem}
 .router-v21-history{max-height:180px;overflow:auto;white-space:pre-line;line-height:1.8;font-variant-numeric:tabular-nums}
+
+.router-v22{padding:0 12px 12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:9px}
+.router-v22 p{margin:0;padding:10px 12px;border:1px solid var(--line,#34392e);border-radius:8px;color:var(--muted,#a7afa5);font-size:.84rem;line-height:1.55;overflow-wrap:anywhere}

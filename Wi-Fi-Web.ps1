@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1', 'WifiReliabilityV31.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -35,15 +35,18 @@ function Save-WebMeasurements($Run, [long] $Now) {
 
 function Start-WebScan($Run, [long] $Now, [bool] $Force) {
     if ($Run.Worker) { return }
-    $diagnosticsOnly = [bool] ($Run.ScanBlocked -and -not $Force)
+    $retry=Test-WifiRecoveryRetry $Run.Recovery ([bool]$Run.ScanBlocked) $Now
+    if($retry) {$Run.Recovery.LastRetryAt=$Now}
+    $diagnosticsOnly = [bool] ($Run.ScanBlocked -and -not ($Force -or $retry))
     $active = -not $diagnosticsOnly -and ($Force -or ($Now - $Run.LastActive -ge 90000 -and -not $Run.Engine.Incident))
     $Run.Active = $active
     if ($active) { $Run.LastActive = $Now; $Run.WanSample = $null }
-    try { $Run.Worker = Start-WifiScanJob $active $diagnosticsOnly }
+    try { $Run.Worker = Start-WifiScanJob $active $diagnosticsOnly ([string]$Run.SelectedAdapter) }
     catch {
         $Run.Issue = $_.Exception.GetBaseException().Message
         $Run.Active = $false
-        $Run.NextScan = $Now + 5000
+        Add-WifiRecoveryEvent $Run.Recovery $Now $Run.Issue
+        $Run.NextScan = $Now + (Get-WifiRecoveryDelay ([int]$Run.Recovery.Failures) ([bool]$Run.ScanBlocked))
         return
     }
     $Run.ScanStartedAt = $Now
@@ -111,6 +114,10 @@ function Receive-WebScan($Run) {
         $result = Receive-WifiScanJob $Run.Worker
         $Run.ScanBlocked = [bool] $result.ScanBlocked
         if ($Run.ScanBlocked) {
+            $Run.NativeCompleted = $false
+            if(-not $Run.Recovery.LastFailureAt -or (Get-UnixMilliseconds)-$Run.Recovery.LastFailureAt -ge 60000){
+                Add-WifiRecoveryEvent $Run.Recovery (Get-UnixMilliseconds) 'Windows location access denied'
+            }
             $Run.Issue = ''
             $Run.Points = @()
             $Run.Source = ''
@@ -146,6 +153,7 @@ function Receive-WebScan($Run) {
         }
         $Run.Issue = ''
         $Run.ScanFailures = 0
+        Reset-WifiRecovery $Run.Recovery
         $Run.Diagnostics = $result.Diagnostics
         $Run.Link = Get-LinkState $result.Diagnostics
         Set-WebRoute $Run $result.Diagnostics
@@ -183,6 +191,7 @@ function Receive-WebScan($Run) {
     } catch {
         $Run.Issue = $_.Exception.GetBaseException().Message
         $Run.ScanFailures++
+        Add-WifiRecoveryEvent $Run.Recovery (Get-UnixMilliseconds) $Run.Issue
         $Run.NextScan = (Get-UnixMilliseconds) + (Get-WifiScanInterval $false $true $false $false $Run.ScanFailures)
         $Run.LastActive = 0L
         $Run.Streak.Clear()
@@ -314,6 +323,7 @@ $run = @{
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
     Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null; WlanEvents=$null
+    Recovery=New-WifiRecoveryState; SelectedAdapter=''; AdapterInventory=@(); StartupChecks=$null; Alert=$null
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -335,6 +345,8 @@ try {
     $run.LanPing = [Net.NetworkInformation.Ping]::new()
     $run.WanPing = [Net.NetworkInformation.Ping]::new()
     $run.WanTarget = [Net.IPAddress]::Parse('1.1.1.1')
+    $run.AdapterInventory = @(Get-WifiAdapterInventory)
+    $run.StartupChecks = Get-WifiLocalStartupChecks $run.Database $run.AdapterInventory (Join-Path $PSScriptRoot 'web')
     $run.CaptureSupport = Get-WifiV3CaptureCapabilities
     $run.DirectInventory = Get-WifiV3DirectInventory
     $run.WlanEvents = Get-WifiV3DriverEvents
@@ -375,6 +387,16 @@ try {
         while ($command = $server.TakeCommand()) {
             switch ($command.Name) {
                 'refresh' { Start-WebScan $run $now $true }
+                'adapter' {
+                    $known=@($run.AdapterInventory | Where-Object {$_.id -eq $command.Value})
+                    if(-not $command.Value -or $known.Count) {
+                        $run.SelectedAdapter=[string]$command.Value
+                        $run.NeighborTracker=New-WifiNeighborTracker
+                        $run.Roaming=New-WifiRoamTracker
+                        $run.Plans.Clear();$run.Streak.Clear()
+                        Start-WebScan $run $now $true
+                    }
+                }
                 'home' {
                     if ($command.Value -cne $run.HomeName) {
                         $run.HomeName = $command.Value
@@ -395,6 +417,7 @@ try {
             $run.Active = $false
             $run.ScanStartedAt = 0L
             $run.ScanFailures++
+            Add-WifiRecoveryEvent $run.Recovery $now 'timeout'
             $run.NextScan = $now + (Get-WifiScanInterval $false $true $false $false $run.ScanFailures)
             $run.Issue = 'Сканирование не ответило. Перезапускаю проверку автоматически.'
         }

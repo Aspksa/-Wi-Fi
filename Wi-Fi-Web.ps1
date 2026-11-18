@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -47,7 +47,7 @@ function Start-WebScan($Run, [long] $Now, [bool] $Force) {
         return
     }
     $Run.ScanStartedAt = $Now
-    $Run.NextScan = $Now + 30000
+    $Run.NextScan = $Now + (Get-WifiScanInterval ([bool]$Run.ScanBlocked) ([bool]$Run.Issue) ([bool]$Run.Engine.Incident) ([bool]($Run.NeighborTracker.CompletedSurveys -ge 5)) ([int]$Run.ScanFailures))
 }
 
 function Set-WebRoute($Run, $Diagnostics) {
@@ -128,11 +128,13 @@ function Receive-WebScan($Run) {
         if ($result.Native) {
             $connected = @($result.Native.Connected | Where-Object { $_ })
             $Run.Points = @(ConvertFrom-NativeScan $result.Native $Run.HomeName)
+            $Run.NativeCompleted = [bool]$result.Native.Completed
             $Run.Source = 'Windows WLAN'
             $Run.ScanAt = $result.Native.FinishedAt
         } else {
             $connected = @(Get-ConnectedAddresses $result.Interfaces)
             $Run.Points = @(Get-WifiPoints $result.Networks $connected $Run.HomeName)
+            $Run.NativeCompleted = $false
             $Run.Source = 'netsh'
             $Run.ScanAt = Get-UnixMilliseconds
         }
@@ -142,6 +144,7 @@ function Receive-WebScan($Run) {
             $Run.Server.SetSpectrum((ConvertTo-Json -InputObject $frames -Depth 8 -Compress))
         }
         $Run.Issue = ''
+        $Run.ScanFailures = 0
         $Run.Diagnostics = $result.Diagnostics
         $Run.Link = Get-LinkState $result.Diagnostics
         Set-WebRoute $Run $result.Diagnostics
@@ -174,7 +177,8 @@ function Receive-WebScan($Run) {
         Save-WebHistory $Run
     } catch {
         $Run.Issue = $_.Exception.GetBaseException().Message
-        $Run.NextScan = (Get-UnixMilliseconds) + 5000
+        $Run.ScanFailures++
+        $Run.NextScan = (Get-UnixMilliseconds) + (Get-WifiScanInterval $false $true $false $false $Run.ScanFailures)
         $Run.LastActive = 0L
         $Run.Streak.Clear()
         $Run.Advice.Clear()
@@ -300,6 +304,7 @@ $run = @{
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
     RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
+    ScanFailures=0; NativeCompleted=$false
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
     NeighborTracker = New-WifiNeighborTracker
@@ -380,7 +385,8 @@ try {
             $run.Worker = $null
             $run.Active = $false
             $run.ScanStartedAt = 0L
-            $run.NextScan = $now + 10000
+            $run.ScanFailures++
+            $run.NextScan = $now + (Get-WifiScanInterval $false $true $false $false $run.ScanFailures)
             $run.Issue = 'Сканирование не ответило. Перезапускаю проверку автоматически.'
         }
         if ($now -ge $run.NextScan) { Start-WebScan $run $now $false }

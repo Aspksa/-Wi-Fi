@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -154,6 +154,10 @@ function Receive-WebScan($Run) {
         Update-WifiRadio $Run.Engine $radio $Run.ScanAt
         if ($result.Native) {
             [void](Update-WifiNeighborTracker $Run.NeighborTracker $Run.Points ([long]$Run.ScanAt) 'Windows WLAN' ([bool]$result.Native.Completed))
+            $own=@($Run.Points | Where-Object {$_.BSSID -eq $result.Native.Connected -and $_.Fresh -ne $false} | Select-Object -First 1)
+            if($own.Count) {
+                [void](Update-WifiRoamTracker $Run.Roaming ([string]$result.Native.Connected) ([string]$own[0].SSID) ([long]$Run.ScanAt) ([bool]$result.Native.Completed) @($Run.Latency))
+            }
         }
         if ($Run.Database -and $Run.Engine.PendingScans.Count -lt 120) {
             $Run.Engine.PendingScans.Add([pscustomobject] @{
@@ -309,6 +313,7 @@ $run = @{
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
+    Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null; WlanEvents=$null
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -330,6 +335,9 @@ try {
     $run.LanPing = [Net.NetworkInformation.Ping]::new()
     $run.WanPing = [Net.NetworkInformation.Ping]::new()
     $run.WanTarget = [Net.IPAddress]::Parse('1.1.1.1')
+    $run.CaptureSupport = Get-WifiV3CaptureCapabilities
+    $run.DirectInventory = Get-WifiV3DirectInventory
+    $run.WlanEvents = Get-WifiV3DriverEvents
     $server = [WiFi.WebServer]::new((Join-Path $PSScriptRoot 'web'))
     $run.Server = $server
     if ($run.Database) {

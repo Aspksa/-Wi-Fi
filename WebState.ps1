@@ -17,6 +17,12 @@ function ConvertTo-WebPoint($Point, $Tracked) {
         segments = @(Get-SignalSegments $shape)
         width = $(if ($shape.Secondary) { "$($shape.Width)+$($shape.Width)" } else { [string] $shape.Width })
         measured = [bool] $shape.Measured
+        hiddenSsid = [bool](-not $Point.SSID -or $Point.HiddenSsid)
+        generation = $(if($Point.Capabilities){[string]$Point.Capabilities.Generation}else{'unverified'})
+        heAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.He)
+        ehtAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Eht)
+        p2pAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.WifiDirect)
+        rsnAdvertised = [bool]($Point.Capabilities -and $Point.Capabilities.Rsn)
         own = [bool] $Point.Own
         stale = $Point.Fresh -eq $false
         tracked = $Tracked -and $Tracked.BSSID -eq $Point.BSSID -and $Tracked.Band -eq $Point.Band
@@ -96,6 +102,11 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         source = $Session.Source; issue = $Session.Issue; storage = $Session.Storage
         neighborScan = Get-WifiNeighborSummary @($Session.Points) ([string]$Session.Source) ([long]$Session.ScanAt) $Now ([bool]$Session.ScanBlocked)
         neighborEvolution = Get-WifiNeighborEvolution $Session.NeighborTracker $Now
+        radioV3 = Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)
+        captureSupport = $Session.CaptureSupport
+        directInventory = $Session.DirectInventory
+        wlanEvents = $Session.WlanEvents
+        researchV3 = Get-WifiV3Hypotheses (Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)) (Get-WifiNeighborEvolution $Session.NeighborTracker $Now) @($Session.HourlyNeighbors)
         scanConfidence = Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count
         permissionGuidance = Get-WifiPermissionGuidance ([bool]$Session.ScanBlocked) ([string]$Session.Issue)
         adapterSummary = Get-WifiAdapterSummary $Session.Adapter ([string]$Session.AdapterDriverVersion)

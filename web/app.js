@@ -386,6 +386,28 @@ function renderState(next) {
     "Соседние Wi-Fi-сети: " + scanSummary.neighborCount + " · " +
     summaryBands.join(" | ") + ". " + scanSummary.explanation :
     "Ожидание сканирования.";
+  const v3 = state.radioV3 || {};
+  byId("v3-beacon").textContent = "Beacon IE: скрытых SSID " + (v3.hidden ?? 0) +
+    ", HE/Wi-Fi 6 " + (v3.he ?? 0) + ", EHT/Wi-Fi 7 " + (v3.eht ?? 0) +
+    ", P2P IE " + (v3.p2pAdvertised ?? 0) + ". Это объявленные возможности, а не измерение скорости.";
+  const direct = state.directInventory || {};
+  byId("v3-direct").textContent = "Wi-Fi Direct: локальных виртуальных адаптеров " +
+    (direct.virtualAdapters?.length || 0) + "; поиск соседних Direct-устройств не выполняется без поддерживаемого интерфейса.";
+  const cap = state.captureSupport || {};
+  byId("v3-monitor").textContent = "Monitor Capture: " + (cap.npcapPresent ? "Npcap обнаружен" : "Npcap не обнаружен") +
+    "; захват отключён, поддержка драйвером не подтверждена. PCAP доступен для офлайн-анализа.";
+  const wlanEvents = state.wlanEvents || {};
+  byId("v3-events").textContent = wlanEvents.status === "read-only" ?
+    "WLAN AutoConfig, последние 12 часов: событий " + (wlanEvents.count || 0) +
+    " · " + (wlanEvents.events || []).map(e => "ID " + e.id + " (" + e.at + ")").join(", ") :
+    "Журнал WLAN: нет доступных событий или Windows ограничила чтение.";
+  byId("v3-roam").textContent = v3.recentRoams?.length ?
+    "Роуминг: " + v3.recentRoams.map(r => r.from + " → " + r.to +
+       " · локальных проблем рядом " + r.localProblemsNearby + " (причина не установлена)").join("; ") :
+    "Роуминг: подтверждённых переключений своего BSSID пока нет.";
+  byId("v3-research").textContent = state.researchV3?.items?.length ?
+    "Гипотезы: " + state.researchV3.items.join(" ") :
+    "Гипотезы: ещё недостаточно сопоставимых измерений.";
   const evolution = state.neighborEvolution || {};
   byId("neighbor-evolution").textContent = evolution.status === "observed" ?
     "Наблюдений: " + evolution.completeSurveys + " · устойчивых точек: " + evolution.stable +

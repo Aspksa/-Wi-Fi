@@ -24,6 +24,21 @@ namespace WiFi
         }
     }
 
+    public sealed class RadioCapabilities
+    {
+        public bool Ht { get; internal set; }
+        public bool Vht { get; internal set; }
+        public bool He { get; internal set; }
+        public bool Eht { get; internal set; }
+        public bool Rsn { get; internal set; }
+        public bool WifiDirect { get; internal set; }
+        public bool Truncated { get; internal set; }
+        public int ParsedElements { get; internal set; }
+        public string Generation { get { return Eht ? "Wi-Fi 7 capable" :
+            He ? "Wi-Fi 6 capable" : Vht ? "Wi-Fi 5 capable" :
+            Ht ? "Wi-Fi 4 capable" : "unverified"; } }
+    }
+
     public sealed class RadioPoint
     {
         public string Name { get; internal set; }
@@ -35,6 +50,8 @@ namespace WiFi
         public int Rssi { get; internal set; }
         public long? SeenAt { get; internal set; }
         public RadioWidth Width { get; internal set; }
+        public RadioCapabilities Capabilities { get; internal set; }
+        public bool HiddenSsid { get; internal set; }
     }
 
     public sealed class RadioScan
@@ -265,6 +282,7 @@ namespace WiFi
                 if (seenAt.HasValue && finished - seenAt.Value > 90000) { continue; }
 
                 RadioWidth width = null;
+                RadioCapabilities caps = new RadioCapabilities();
                 int offset = Marshal.ReadInt32(row, 352);
                 int length = Marshal.ReadInt32(row, 356);
                 if (length > 0 && length <= 4096 && offset >= tableEnd - rowOffset && offset <= size - rowOffset - length)
@@ -272,15 +290,54 @@ namespace WiFi
                     var bytes = new byte[length];
                     Marshal.Copy(IntPtr.Add(row, offset), bytes, 0, length);
                     width = DecodeWidth(bytes, band, channel, frequency);
+                    caps = DecodeCapabilities(bytes);
                 }
                 points.Add(new RadioPoint
                 {
                     Name = ReadName(row), Address = MacAddress(row, 40), Band = band, Channel = channel,
                     Frequency = frequency, Signal = Math.Max(0, Math.Min(100, Marshal.ReadInt32(row, 60))),
-                    Rssi = Marshal.ReadInt32(row, 56), SeenAt = seenAt, Width = width
+                    Rssi = Marshal.ReadInt32(row, 56), SeenAt = seenAt, Width = width,
+                    HiddenSsid = Marshal.ReadInt32(row) == 0,
+                    Capabilities = caps
                 });
             }
             return points;
+        }
+
+        // Parse only bounded information elements from a BSS entry.
+        // An IE describes advertised capabilities, not the generation of the client link.
+        public static RadioCapabilities DecodeCapabilities(byte[] bytes)
+        {
+            var data = new RadioCapabilities();
+            if (bytes == null) { return data; }
+            if (bytes.Length > 4096) { data.Truncated = true; return data; }
+            for (int i = 0; i + 2 <= bytes.Length;)
+            {
+                int id = bytes[i++];
+                int length = bytes[i++];
+                if (length > bytes.Length - i) { data.Truncated = true; break; }
+                data.ParsedElements++;
+                if (id == 45 || id == 61) { data.Ht = true; }
+                if (id == 191 || id == 192) { data.Vht = true; }
+                if (id == 48) { data.Rsn = true; }
+                if (id == 255 && length >= 2)
+                {
+                    // 802.11 extended IE identifiers: HE Capabilities/Operation 35/36,
+                    // EHT Operation 106, EHT Capabilities 108.
+                    int ext = bytes[i];
+                    if (ext == 35 || ext == 36) { data.He = true; }
+                    if (ext == 106 || ext == 108) { data.Eht = true; }
+                }
+                if (id == 221 && length >= 4 &&
+                    bytes[i] == 0x50 && bytes[i + 1] == 0x6f &&
+                    bytes[i + 2] == 0x9a && bytes[i + 3] == 0x09)
+                {
+                    data.WifiDirect = true; // P2P vendor IE, not confirmed device discovery.
+                }
+                i += length;
+            }
+            if (bytes.Length > 0 && data.ParsedElements == 0) { data.Truncated = true; }
+            return data;
         }
 
         private static int SegmentFrequency(string band, int channel)

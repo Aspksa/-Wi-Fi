@@ -27,15 +27,14 @@ Assert (-not (Get-WifiRecommendationConfidence $guard 'observed' 2).eligible) 'T
 Assert (-not (Get-WifiRecommendationConfidence $guard 'unverified-cache' 5).eligible) 'Cached result blocks advice'
 Assert ((Get-WifiRecommendationConfidence $guard 'observed' 3).eligible) 'Three surveys and guard permit manual trial'
 Assert (-not (Get-WifiRecommendationConfidence $guard 'observed' 5).automaticChange) 'Router remains unchanged'
-# Query mock: no database service required for shape and grouping logic.
-$db=[pscustomobject]@{}
-$db | Add-Member -MemberType ScriptMethod -Name Query -Value {
-  param($sql,$args)
-  @(
-   @(360L, '[{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:01","Own":false,"Fresh":true}]')
-   @(360L, '[{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:02","Own":false,"Fresh":true},{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:03","Own":false,"Fresh":true}]')
+# Query mock preserves array-of-rows shape exactly as the SQLite adapter.
+$db=[pscustomobject]@{
+  Rows=@(
+    ,@(360L, '[{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:01","Own":false,"Fresh":true}]')
+    ,@(360L, '[{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:02","Own":false,"Fresh":true},{"Band":"2.4","BSSID":"aa:aa:aa:aa:aa:03","Own":false,"Fresh":true}]')
   )
 }
+$db | Add-Member ScriptMethod Query {param($sql,$params) return ,$this.Rows}
 $rows=@(Get-WifiHourlyNeighborDensity $db 1500000000L @())
 Assert ($rows.Count -eq 1 -and $rows[0].band -eq '2.4') 'Two scans grouped by hour'
 Assert ($rows[0].averageNeighbors -eq 1.5 -and $null -eq $rows[0].localBadPercent) 'Density and honest lack of local samples'

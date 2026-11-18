@@ -6,6 +6,7 @@ const stopped = byId("stop-tracking");
 const sources = [
   { key: "2.4", suffix: "24", label: "2,4 ГГц", min: 2399, max: 2497, channels: [1, 3, 5, 7, 9, 11, 13] },
   { key: "5", suffix: "5", label: "5 ГГц", min: 5145, max: 5910, channels: [36, 48, 64, 100, 116, 132, 149, 161] },
+  { key: "6", suffix: "6", label: "6 ГГц", min: 5925, max: 7130, channels: [1, 33, 65, 97, 129, 161, 193, 225] },
 ];
 const palette = { grid: "#31372f", text: "#9ba495", gold: "#f0bd62", blue: "#8db9c5", glow: "#ec8848", loss: "#f07c70", trail: "#c2a1ed" };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)");

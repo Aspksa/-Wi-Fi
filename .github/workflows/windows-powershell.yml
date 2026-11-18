@@ -20,6 +20,9 @@ jobs:
       - name: Measured channel comparison tests
         shell: powershell
         run: .\\tests\\RouterDecision.Tests.ps1
+      - name: V2.1 trend, router request and SQLite history
+        shell: powershell
+        run: .\\tests\\RouterInsights.Tests.ps1
       - name: Existing PowerShell regression tests
         shell: powershell
         run: |

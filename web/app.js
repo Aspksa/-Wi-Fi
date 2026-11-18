@@ -384,6 +384,26 @@ function renderState(next) {
     return [band + " ГГц: " + (top.join("; ") || "нет подтверждённых каналов")];
   });
   byId("router-ranking").textContent = ranking.join(" · ");
+  const capture = state.apiCapture || {};
+  byId("router-api").textContent = "API RE3L: " + (capture.warning || "Нет данных о запросах.") +
+    (capture.readEndpoints ? " Найдено подходящих записей: " + capture.readEndpoints + ". Никакие запросы не выполняются." : "");
+  const trend = state.trend || {};
+  byId("router-trend").textContent = "Качество связи: " +
+    ({ worsening: "рост сбоев", improving: "снижение сбоев", "stable-or-unclear": "существенного изменения не выявлено",
+       insufficient: "мало измерений", unavailable: "нет данных" }[trend.status] || "ожидание") +
+    " · " + (trend.reason || "Сначала собери измерения.");
+  const hourly = state.hourlyEfficiency || [];
+  byId("router-hourly").textContent = hourly.length ? hourly.slice(0, 24).map(r =>
+    r.hourUtc + " UTC · " + r.band + " ГГц / " + r.channel + " (" + r.width + " МГц) · " +
+    r.samples + " проб · " + r.badPercent + "% сбоев · " + r.lossPercent + "% потерь · " +
+    (r.averageMs == null ? "нет задержки" : r.averageMs + " мс")).join("\n") :
+    "Пока недостаточно сохранённых измерений. Результат основан на SQLite.";
+  const trials = state.recentTrials || [];
+  byId("router-trials").textContent = trials.length ? trials.map(r =>
+    new Date(r.at).toLocaleString("ru-RU") + " · " + r.old + " → " + r.new +
+    " · " + r.pairs + " пар · сбои " + r.beforeBad + " → " + r.afterBad +
+    " · " + ({ improved: "улучшение", worse: "ухудшение", unclear: "неясно", insufficient: "мало данных" }[r.outcome] || "нет данных")
+  ).join("\n") : "Сравнений пока нет. После ручного изменения канала история появится автоматически.";
   renderHeat();
   renderLists();
   renderMapControls();

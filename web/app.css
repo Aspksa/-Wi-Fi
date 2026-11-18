@@ -158,3 +158,10 @@ tr.stale { color: var(--dim); }
   .hours span { font-size: 8px; }
   th, td { padding-left: 7px; padding-right: 7px; }
 }
+
+/* Router visibility stays on the existing single dashboard. */
+.router-insight{margin-top:16px}
+.router-insight-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:10px}
+.router-insight-grid p,.router-evidence p{margin:0;padding:10px 12px;color:var(--muted,#a7afa5);font-size:.86rem;line-height:1.5;border:1px solid var(--line,#34392e);border-radius:8px;overflow-wrap:anywhere}
+.router-evidence{margin-top:12px;display:grid;gap:8px}
+.router-evidence strong{font-size:.9rem}

@@ -11,14 +11,18 @@ function Get-WifiLatencyEvidence([object[]] $Samples, [string] $Network, [long] 
     }).Count
     $classification = 'insufficient'
     if ($recent.Count -ge 20) {
-        if ($localBad -ge 3 -and $localBad -gt $externalOnly) { $classification = 'local' }
-        elseif ($externalOnly -ge 3 -and $externalOnly -gt $localBad) { $classification = 'external' }
-        else { $classification = 'stable-or-unclear' }
+        if ($localBad -ge 3 -and $localBad -gt $externalOnly) {
+            $classification = 'local'
+        } elseif ($externalOnly -ge 3 -and $externalOnly -gt $localBad) {
+            $classification = 'external'
+        } else {
+            $classification = 'stable-or-unclear'
+        }
     }
     [pscustomobject] @{ Classification = $classification; Samples = $recent.Count; LocalBad = $localBad; ExternalOnly = $externalOnly }
 }
 
-﻿function Get-ChannelReplay($Plan, [object[]] $Snapshots, [long] $Now) {
+function Get-ChannelReplay($Plan, [object[]] $Snapshots, [long] $Now) {
     $seen = @{}
     $wins = 0
     $count = 0

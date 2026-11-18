@@ -36,8 +36,6 @@ $db=[pscustomobject]@{
 }
 $db | Add-Member ScriptMethod Query {param($sql,$params) return ,$this.Rows}
 $rows=@(Get-WifiHourlyNeighborDensity $db 1500000000L @())
-Write-Host ('DEBUG rows=' + ($rows | ConvertTo-Json -Depth 8 -Compress))
-Write-Host ('DEBUG raw=' + ($db.Query('x',@()) | ConvertTo-Json -Depth 8 -Compress))
 Assert ($rows.Count -eq 1 -and $rows[0].band -eq '2.4') 'Two scans grouped by hour'
 Assert ($rows[0].averageNeighbors -eq 1.5 -and $null -eq $rows[0].localBadPercent) 'Density and honest lack of local samples'
 'Wi-Fi v2.5 spectrum guards passed'

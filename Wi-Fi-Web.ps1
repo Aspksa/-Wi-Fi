@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -80,11 +80,13 @@ function Use-WebRouterFallback($Run, [long] $Now) {
     $Run.Plans.Clear()
     $Run.Streak.Clear()
     $Run.Evidence.Clear()
+    $Run.Quality.Clear()
     foreach ($band in @('2.4','5')) {
         $plan = Get-ChannelPlan $Run.Points $band $connected
         $Run.Plans[$band] = $plan
         $Run.Advice[$band] = 'Импортирован снимок RE3L: оценка кандидатов доступна, но рекомендация не подтверждена живыми замерами.'
         $Run.Evidence[$band] = Get-WifiRecommendationEvidence $plan $null $telemetry
+        $Run.Quality[$band] = @() # Manual export never becomes validated performance evidence
     }
     $frames = @(Update-SpectrumFrames $Run.Spectrum (Get-SpectrumFrame $Run.ScanAt $Run.Points))
     if ($frames.Count) {
@@ -143,12 +145,14 @@ function Receive-WebScan($Run) {
         }
         $latencyEvidence = Get-WifiLatencyEvidence @($Run.Engine.Samples) ([string] $radio.Network) (Get-UnixMilliseconds)
         $Run.Evidence.Clear()
+        $Run.Quality.Clear()
         foreach ($band in @('2.4', '5')) {
             $advice = Get-WifiRecommendation $Run.Points $band $connected $at $Run.Link $result.Native $Run.History `
                 $Run.Database $Run.Streak[$band] $Run.Forecast $latencyEvidence
             $Run.Streak[$band] = $advice.Streak
             $Run.Plans[$band] = $advice.Plan
             $Run.Evidence[$band] = Get-WifiRecommendationEvidence $advice.Plan $latencyEvidence $Run.RouterTelemetry
+            $Run.Quality[$band] = @(Get-WifiQualityRanking $advice.Plan @($Run.Engine.Samples) ([string] $radio.Network) (Get-UnixMilliseconds))
             $Run.Advice[$band] = $advice.Text
             if ($advice.StorageNote) { $Run.Storage = $advice.StorageNote }
         }
@@ -282,7 +286,7 @@ $run = @{
     Link = 'unknown'; Issue = ''; Storage = ''; Source = ''; WifiRoute = $false; Epoch = 0
     NextScan = 0L; NextLan = 0L; NextWan = 0L; LastActive = 0L; ScanAt = 0L
     NextPrune = 0L; NextRouterCheck = 0L; NextRouterTelemetry = 0L; Router = $null; RouterTelemetry = $null
-    RouterTelemetryPath = ''; Evidence = @{}; Automation = Get-RouterAutomationPolicy $null $null
+    RouterTelemetryPath = ''; Evidence = @{}; Quality = @{}; Automation = Get-RouterAutomationPolicy $null $null
 }
 $server = $null
 try {
@@ -373,6 +377,7 @@ try {
                     $run.Source = ''
                     $run.Plans.Clear()
                     $run.Evidence.Clear()
+                    $run.Quality.Clear()
                 }
             }
         }

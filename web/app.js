@@ -199,6 +199,9 @@ function mapPoints() {
 function pointCaption(point) {
   return point.name + " · канал " + point.channel + " · " + point.frequency + " МГц · " + point.signalText +
     " · " + (point.measured ? "" : "≈") + point.width + " МГц" +
+    (point.generation && point.generation !== "unverified" ? " · " + point.generation : "") +
+    (point.rsnVersion != null ? " · RSN v" + point.rsnVersion : "") +
+    (point.unknownIeCount ? " · других IE " + point.unknownIeCount : "") +
     (point.stale ? " · " + (point.observedAt ? "видели в " + new Date(point.observedAt).toLocaleTimeString("ru-RU") : "старый замер") : "");
 }
 

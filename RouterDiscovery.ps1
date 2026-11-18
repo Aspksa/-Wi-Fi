@@ -1,4 +1,4 @@
-# Read-only discovery. Never logs in, changes router settings, or scans arbitrary addresses.
+﻿# Read-only discovery. Never logs in, changes router settings, or scans arbitrary addresses.
 function Get-WifiRouterAddress($Diagnostics) {
     if (-not $Diagnostics -or -not $Diagnostics.Gateway) { return $null }
     $address = $Diagnostics.Gateway

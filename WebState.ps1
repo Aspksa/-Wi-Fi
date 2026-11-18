@@ -105,6 +105,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         radioV3 = Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)
         captureSupport = $Session.CaptureSupport
         directInventory = $Session.DirectInventory
+        wlanEvents = $Session.WlanEvents
         researchV3 = Get-WifiV3Hypotheses (Get-WifiV3RadioSummary @($Session.Points) $Session.Roaming $Now ([bool]$Session.NativeCompleted)) (Get-WifiNeighborEvolution $Session.NeighborTracker $Now) @($Session.HourlyNeighbors)
         scanConfidence = Get-WifiScanConfidence ([string]$Session.Source) ([bool]$Session.NativeCompleted) ([long]$Session.ScanAt) $Now @($Session.Points | Where-Object {$_.Fresh -ne $false}).Count
         permissionGuidance = Get-WifiPermissionGuidance ([bool]$Session.ScanBlocked) ([string]$Session.Issue)

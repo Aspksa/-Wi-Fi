@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'WebState.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -38,13 +38,14 @@ function Start-WebScan($Run, [long] $Now, [bool] $Force) {
     $active = $Force -or ($Now - $Run.LastActive -ge 90000 -and -not $Run.Engine.Incident)
     $Run.Active = $active
     if ($active) { $Run.LastActive = $Now; $Run.WanSample = $null }
-    $Run.Worker = [PowerShell]::Create()
-    [void] $Run.Worker.AddCommand((Join-Path $PSScriptRoot 'ScanWorker.ps1'))
-    [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
-    [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
-    [void] $Run.Worker.AddArgument($active)
+    try { $Run.Worker = Start-WifiScanJob $active }
+    catch {
+        $Run.Issue = $_.Exception.GetBaseException().Message
+        $Run.Active = $false
+        $Run.NextScan = $Now + 5000
+        return
+    }
     $Run.ScanStartedAt = $Now
-    $Run.ScanTask = $Run.Worker.BeginInvoke()
     $Run.NextScan = $Now + 30000
 }
 
@@ -52,6 +53,7 @@ function Set-WebRoute($Run, $Diagnostics) {
     if ([string] $Run.Gateway -eq [string] $Diagnostics.Gateway -and
             [string] $Run.AdapterId -eq [string] $Diagnostics.AdapterId -and
             $Run.WifiRoute -eq [bool] $Diagnostics.WifiRoute) { return }
+    Reset-WifiMeasurementContext $Run.Engine (Get-UnixMilliseconds)
     $Run.Epoch++
     $Run.Gateway = $Diagnostics.Gateway
     $Run.WifiRoute = [bool] $Diagnostics.WifiRoute
@@ -67,9 +69,7 @@ function Set-WebRoute($Run, $Diagnostics) {
 
 function Receive-WebScan($Run) {
     try {
-        $result = $Run.Worker.EndInvoke($Run.ScanTask) | Select-Object -Last 1
-        if ($Run.Worker.HadErrors) { throw $Run.Worker.Streams.Error[0] }
-        if (-not $result) { throw 'Windows не вернула результат сканирования.' }
+        $result = Receive-WifiScanJob $Run.Worker
         if ($result.Native) {
             $connected = @($result.Native.Connected | Where-Object { $_ })
             $Run.Points = @(ConvertFrom-NativeScan $result.Native $Run.HomeName)
@@ -111,15 +111,18 @@ function Receive-WebScan($Run) {
         Save-WebHistory $Run
     } catch {
         $Run.Issue = $_.Exception.GetBaseException().Message
+        $Run.NextScan = (Get-UnixMilliseconds) + 5000
+        $Run.LastActive = 0L
         $Run.Streak.Clear()
         $Run.Advice.Clear()
+        $Run.Plans.Clear()
+        $Run.Forecast = $null
         $Run.Diagnostics = $null
         $Run.Link = 'unknown'
         Set-WebRoute $Run $null
     } finally {
-        $Run.Worker.Dispose()
+        Close-WifiScanJob $Run.Worker
         $Run.Worker = $null
-        $Run.ScanTask = $null
         $Run.Active = $false
     }
 }
@@ -131,7 +134,7 @@ function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
         band = $null; wanMs = $null; wanLost = $null
     }
     $Run.Latency = @($Run.Latency | Where-Object { $At - $_.at -le 60000 }) + @($liveSample)
-    if ($liveSample.scan) { return }
+
     $radio = $Run.Engine.Radio
     if ($radio -and ($At - $radio.At -gt 45000 -or
             ($radio.ObservedAt -and $At - $radio.ObservedAt -gt 45000))) { $radio = $null }
@@ -146,6 +149,7 @@ function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
     $external = $Run.WanSample
     $Run.WanSample = $null
     if ($external -and $At - $external.At -gt 1400) { $external = $null }
+    $liveSample.scan = $liveSample.scan -or $At -lt $Run.Engine.SettleUntil
     $liveSample.band = $radio.Band
     $liveSample.wanMs = $external.Milliseconds
     $liveSample.wanLost = $external.Lost
@@ -158,6 +162,7 @@ function Add-WebLatency($Run, [long] $At, $Milliseconds, [bool] $Lost) {
         At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Width = $radio.Width; Signal = $radio.Signal
         Upload = $upload; Overlap = $overlap; Lan = $Milliseconds; LanLoss = $Lost
         Wan = $external.Milliseconds; WanLoss = $external.Lost
+        Scanning = [bool] ($Run.Active -or $Run.LanDuringScan)
     }
     $entries = @(Add-WifiSample $Run.Engine $measurement {
         param($network, $context)
@@ -185,7 +190,7 @@ function Update-WebProbes($Run, [long] $Now) {
         if ($task.Status -eq 'Faulted') { [void] $task.Exception }
         if ($task.Status -eq 'RanToCompletion' -and -not $Run.Active -and $Run.WanEpoch -eq $Run.Epoch) {
             $lost = $task.Result.Status -ne 'Success'
-            $Run.WanSample = @{ At = $Now; Lost = $lost; Milliseconds = if (-not $lost) { [int] $task.Result.RoundtripTime } }
+            $Run.WanSample = @{ At = $Now; Lost = $lost; Milliseconds = $(if (-not $lost) { [int] $task.Result.RoundtripTime }) }
         }
     }
     if ($Run.WifiRoute -and $Run.Adapter -and -not $Run.Active -and -not $Run.WanTask -and $Now -ge $Run.NextWan) {
@@ -266,9 +271,23 @@ try {
     try { Start-Process $server.Address } catch { }
     $publishAt = 0L
     $flushAt = 0L
+    $previousLoop = 0L
     while ($true) {
         $now = Get-UnixMilliseconds
-        if ($run.Worker -and $run.ScanTask.IsCompleted) { Receive-WebScan $run }
+        if ($previousLoop -and ($now - $previousLoop -gt 8000 -or $now -lt $previousLoop)) {
+            Close-WifiScanJob $run.Worker
+            $run.Worker = $null
+            $run.Active = $false
+            $run.NextScan = 0L
+            $run.LastActive = 0L
+            Set-WebRoute $run $null
+            Reset-WifiMeasurementContext $run.Engine $now
+            $run.Streak.Clear()
+            $run.Plans.Clear()
+            $run.Forecast = $null
+        }
+        $previousLoop = $now
+        if ($run.Worker -and (Test-WifiScanJobReady $run.Worker)) { Receive-WebScan $run }
         while ($command = $server.TakeCommand()) {
             switch ($command.Name) {
                 'refresh' { Start-WebScan $run $now $true }
@@ -300,7 +319,7 @@ try {
     }
 } finally {
     if ($server) { $server.Dispose() }
-    if ($run.Worker) { $run.Worker.Dispose() }
+    if ($run.Worker) { Close-WifiScanJob $run.Worker }
     $entry = Complete-WifiEpisode $run.Engine
     if ($entry) { Add-MonitorEvent $run.History (Get-Date) $entry.Message }
     Save-WebHistory $run

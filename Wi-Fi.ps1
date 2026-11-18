@@ -5,6 +5,7 @@
 . (Join-Path $PSScriptRoot 'Intelligence.ps1')
 . (Join-Path $PSScriptRoot 'Database.ps1')
 . (Join-Path $PSScriptRoot 'Recommendation.ps1')
+. (Join-Path $PSScriptRoot 'ScanJob.ps1')
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
@@ -503,6 +504,7 @@ function Set-WifiTelemetryRoute($Snapshot) {
     $wanEnabled = [bool] ($Snapshot.WifiRoute -and $Snapshot.Gateway)
     if ([string] $script:gateway -ne [string] $Snapshot.Gateway -or
             [string] $script:adapter.Id -ne [string] $adapterId -or $script:wanEnabled -ne $wanEnabled) {
+        Reset-WifiMeasurementContext $script:engine (Get-UnixMilliseconds)
         $script:networkEpoch++
         $script:wanResult = $null
         $script:trafficPoint = $null
@@ -515,7 +517,7 @@ function Set-WifiTelemetryRoute($Snapshot) {
     Set-ProbeGateway $Snapshot.Gateway
 }
 
-function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost) {
+function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost, [bool] $Scanning) {
     $radio = $script:engine.Radio
     if ($radio -and ($At - $radio.At -gt 45000 -or
             ($radio.ObservedAt -and $At - $radio.ObservedAt -gt 45000))) { $radio = $null }
@@ -538,7 +540,7 @@ function Add-LatencyMeasurement([long] $At, $Milliseconds, [bool] $Lost) {
     $measurement = [pscustomobject] @{
         At = $At; Network = [string] $radio.Network; Channel = $radio.Channel; Width = $radio.Width; Signal = $radio.Signal
         Upload = $upload; Overlap = $overlap; Lan = $Milliseconds; LanLoss = $Lost
-        Wan = $external.Milliseconds; WanLoss = $external.Lost
+        Wan = $external.Milliseconds; WanLoss = $external.Lost; Scanning = $Scanning
     }
     $entries = @(Add-WifiSample $script:engine $measurement {
         param($network, $context)
@@ -561,6 +563,22 @@ function Set-ProbeGateway($Address) {
 $probeTimer.Add_Tick({
     $now = $clock.Elapsed.TotalSeconds
     $at = Get-UnixMilliseconds
+    if ($script:lastProbeTick -and ($at - $script:lastProbeTick -gt 8000 -or $at -lt $script:lastProbeTick)) {
+        $poll.Stop()
+        Close-WifiScanJob $script:worker
+        $script:worker = $null
+        Set-WifiTelemetryRoute $null
+        Reset-WifiMeasurementContext $script:engine $at
+        $script:streak.Clear()
+        $script:plans.Clear()
+        $script:forecast = $null
+        Start-Scan $true
+    }
+    $script:lastProbeTick = $at
+    if ($script:retryScanAt -and $at -ge $script:retryScanAt -and -not $script:worker) {
+        $script:retryScanAt = 0L
+        Start-Scan $true
+    }
     if ($script:wanTask -and $script:wanTask.IsCompleted) {
         $task = $script:wanTask
         $script:wanTask = $null
@@ -569,7 +587,7 @@ $probeTimer.Add_Tick({
             $reply = $task.Result
             $lost = $reply.Status -ne 'Success'
             $script:wanResult = @{
-                At = $at; Lost = $lost; Milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
+                At = $at; Lost = $lost; Milliseconds = $(if (-not $lost) { [int] $reply.RoundtripTime })
             }
         }
     }
@@ -593,9 +611,7 @@ $probeTimer.Add_Tick({
             $lost = $reply.Status -ne 'Success'
             $milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
             $level = Get-LatencyLevel $milliseconds $lost
-            if (-not $script:activeRadioScan -and -not $script:lanDuringScan) {
-                Add-LatencyMeasurement $at $milliseconds $lost
-            }
+            Add-LatencyMeasurement $at $milliseconds $lost ($script:activeRadioScan -or $script:lanDuringScan)
             $script:latencySamples = @($script:latencySamples | Where-Object { $now - $_.At -le 60 }) +
                 @([pscustomobject] @{ At = $now; Milliseconds = $milliseconds; Level = $level })
             if ($level -ne 'normal') {
@@ -644,22 +660,23 @@ function Start-Scan([bool] $Force = $false) {
     }
     $refresh.Enabled = $false
     $status.Text = 'Обновление Wi-Fi и диагностики…'
-    $script:worker = [PowerShell]::Create()
-    [void] $script:worker.AddCommand((Join-Path $PSScriptRoot 'ScanWorker.ps1'))
-    [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
-    [void] $script:worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
-    [void] $script:worker.AddArgument($active)
-    $script:scan = $script:worker.BeginInvoke()
+    try { $script:worker = Start-WifiScanJob $active }
+    catch {
+        $status.Text = $_.Exception.GetBaseException().Message
+        $script:activeRadioScan = $false
+        $script:retryScanAt = (Get-UnixMilliseconds) + 5000
+        $refresh.Enabled = $true
+        return
+    }
     $poll.Start()
 }
 
 $poll.Add_Tick({
-    if (-not $script:scan.IsCompleted) { return }
+    if (-not (Test-WifiScanJobReady $script:worker)) { return }
     $poll.Stop()
     try {
-        $result = $script:worker.EndInvoke($script:scan) | Select-Object -Last 1
-        if ($script:worker.HadErrors) { throw $script:worker.Streams.Error[0] }
-        if (-not $result) { throw 'Windows не вернула результат сканирования.' }
+        $result = Receive-WifiScanJob $script:worker
+        $script:retryScanAt = 0L
         $previousPoints = $script:points
         if ($result.Native) {
             $connectedAddresses = @($result.Native.Connected | Where-Object { $_ })
@@ -705,16 +722,18 @@ $poll.Add_Tick({
         $script:lastScanAt = $at
         $status.Text = "Замер $($at.ToString('HH:mm:ss'))  ·  $source  ·  Точек: $($script:points.Count)  ·  Золотой контур — свой канал. $script:storageNote"
     } catch {
+        $script:retryScanAt = (Get-UnixMilliseconds) + 5000
         $script:streak.Clear()
+        $script:plans.Clear()
+        $script:forecast = $null
         Set-WifiTelemetryRoute $null
         foreach ($band in $adviceLabels.Keys) { $adviceLabels[$band].Text = 'Ожидание свежего замера' }
         $status.Text = if ($script:lastScanAt) {
             "Обновление не удалось. Последний замер $($script:lastScanAt.ToString('HH:mm:ss'))."
         } else { "Не удалось обновить: $($_.Exception.GetBaseException().Message)" }
     } finally {
-        $script:worker.Dispose()
+        Close-WifiScanJob $script:worker
         $script:worker = $null
-        $script:scan = $null
         $script:activeRadioScan = $false
         $refresh.Enabled = $true
     }
@@ -773,7 +792,7 @@ try {
     $ping.Dispose()
     $wanPing.Dispose()
     $toolTip.Dispose()
-    if ($script:worker) { $script:worker.Dispose() }
+    if ($script:worker) { Close-WifiScanJob $script:worker }
     $form.Dispose()
     $mutex.ReleaseMutex()
     $mutex.Dispose()

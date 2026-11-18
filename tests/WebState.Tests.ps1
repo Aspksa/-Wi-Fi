@@ -23,6 +23,7 @@ $advice = Get-WifiRecommendation $run.Points '5' @($ownPoint.BSSID) $now 'local'
 $run.Plans['5'] = $advice.Plan
 $run.Advice['5'] = $advice.Text
 Assert ($advice.Text -match '40 / 80 МГц' -and $advice.Streak.Samples -eq 1) 'Dashboard uses shared width recommendations'
+$run.Plans['5'].ReplayEligible = $true
 Update-HeatHistory $run.History $run.Plans $now
 $state = Get-WebState $run (Get-UnixMilliseconds) $now
 Assert ($state.bands.Count -eq 2 -and $state.bands[1].width -eq 160 -and $state.bands[1].heat.Count -eq 24) 'State contains both bands and heat history'
@@ -56,7 +57,7 @@ $archive | Add-Member -MemberType ScriptMethod -Name Query -Value { param($sql, 
 $restored = @(Read-WebSpectrum $archive 200000L)
 Assert ($restored.Count -eq 1 -and $restored[0].at -eq 145000L -and $restored[0].points[0].id -eq (Get-WebPointId $ownPoint)) 'Archived JSON restores chronologically and skips malformed or duplicate records'
 
-$run.Streak = @{ '5' = @{ Samples = 3 } }
+$run.Streak = @{ '5' = @{ Samples = 3; Confirmed = $true } }
 $run.Episodes = @((Get-WebEpisode @{
     Id='probe-1'; At=195000L; Ended=196000L; Network='5|mesh'; Cause='local-overlap'; Message='Скачок'
 }))

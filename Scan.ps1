@@ -16,6 +16,7 @@
                 Band = ''
                 Channel = 0
                 Signal = $null
+            Source = 'netsh'
             }
         } elseif ($point -and $line -match '^\s*(?:Signal|Сигнал|Уровень сигнала)\s*:\s*(\d{1,3})\s*%') {
             $point.Signal = [Math]::Min(100, [int] $Matches[1])
@@ -71,7 +72,8 @@ function ConvertFrom-NativeScan($Result, [string] $HomeName) {
         [pscustomobject] @{
             SSID = $point.Name; BSSID = $point.Address; Band = $point.Band; Channel = $point.Channel
             Signal = $point.Signal; Rssi = $point.Rssi; Frequency = $point.Frequency; RadioWidth = $point.Width
-            ObservedAt = $observedAt; Fresh = $fresh
+            ObservedAt = $(if ($null -ne $observedAt) { $observedAt } elseif ($Result.Completed) { $Result.FinishedAt })
+            Fresh = $fresh; Source = 'WLAN'
             Own = $point.Address -eq $Result.Connected -or ($HomeName -cne '' -and $point.Name -ceq $HomeName)
         }
     }
@@ -164,29 +166,27 @@ function Get-ChannelScore {
     param([int] $Channel, [string] $Band, [object[]] $Neighbors, $Candidate)
 
     if (-not $Candidate) { $Candidate = Get-SignalFootprint $Band $Channel }
-    $score = 0.0
-    foreach ($point in $Neighbors) {
-        $distance = [Math]::Abs($point.Channel - $Channel)
-        if ($Candidate.Measured -or $point.RadioWidth) {
-            $neighborFootprint = Get-SignalFootprint $Band $point.Channel $point
-            $intersection = 0.0
-            foreach ($section in (Get-SignalOverlap $Candidate $neighborFootprint)) {
-                $intersection += $section.Right - $section.Left
-            }
-            $width = $Candidate.Width
-            if ($Candidate.Secondary) { $width *= 2 }
-            $overlap = $intersection / $width
-        } elseif ($Band -eq '2.4') {
-            $overlap = [Math]::Max(0.0, 1 - $distance / 5.0)
-        } else {
-            # The scan does not report channel width. Reserve the surrounding 80 MHz block.
-            $block = Get-5GHzBlockStart $Channel
-            $neighborBlock = Get-5GHzBlockStart $point.Channel
-            $overlap = [int] ($distance -eq 0 -or ($block -and $block -eq $neighborBlock))
+    $segments = @(Get-SignalSegments $Candidate)
+    $bins = @(foreach ($segment in $segments) {
+        for ($left = $segment.Left; $left -lt $segment.Right; $left += 20) {
+            @{ Left = $left; Right = [Math]::Min($left + 20, $segment.Right); Load = 0.0 }
         }
-        $score += [Math]::Pow($point.Signal / 100.0, 2) * $overlap * 100
+    })
+    foreach ($point in $Neighbors) {
+        $power = [Math]::Pow($point.Signal / 100.0, 2) * 100
+        $footprint = Get-SignalFootprint $Band $point.Channel $point
+        $neighborSegments = @(Get-SignalSegments $footprint)
+        foreach ($bin in $bins) {
+            foreach ($section in $neighborSegments) {
+                $shared = [Math]::Min($section.Right, $bin.Right) - [Math]::Max($section.Left, $bin.Left)
+                if ($shared -gt 0) { $bin.Load += $power * $shared / ($bin.Right - $bin.Left) }
+            }
+        }
     }
-    [Math]::Round($score)
+    if (-not $bins.Count) { return 0.0 }
+    $load = $bins | ForEach-Object { $_.Load } | Measure-Object -Average -Maximum
+    # Keep broad interference significant while exposing peaks hidden in a wide channel average.
+    [Math]::Round($load.Average * 0.8 + $load.Maximum * 0.2)
 }
 
 function Get-WidthTrialKey([int] $Channel, $Width) {
@@ -218,7 +218,7 @@ function Find-NarrowerChannel([string] $Band, $HomePoint, $Current, [int[]] $Cha
                     Rank = $score + $(if ($trial -and $trial.Count -ge 2) {
                         [Math]::Max(-15, [Math]::Min(15, 5 * ($trial.Losses - $trial.Wins)))
                     } else { 0 })
-                    TrialSupport = if ($proven) { $trial }
+                    TrialSupport = $(if ($proven) { $trial })
                     KeepChannel = $channel -eq $HomePoint.Channel
                 }
             }
@@ -293,7 +293,7 @@ function Get-ChannelPlan {
         Rows = $rows
         Best = $best
         Improves = $improves
-        TrialSupport = if ($proven) { $trialSupport }
+        TrialSupport = $(if ($proven) { $trialSupport })
         VisibleCount = $visible.Count
     }
 }

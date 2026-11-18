@@ -112,3 +112,13 @@ try {
     if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse }
 }
 'Passed 31 intelligence and SQLite checks'
+
+$guard = New-WifiIntelligence
+$scanSample = Sample 100000L 6 300
+$scanSample | Add-Member -NotePropertyName Scanning -NotePropertyValue $true
+$null = Add-WifiSample $guard $scanSample $null
+Assert ($guard.PendingSamples[0].Overlap -eq 'scan' -and -not $guard.Incident -and -not $guard.Samples.Count) 'Active scan is stored but excluded from incident and trial evidence'
+Update-WifiRadio $guard @{ Network = '2.4|aa|Дом' } 101000L
+Update-WifiRadio $guard @{ Network = '5|bb|Дом' } 102000L
+$null = Add-WifiSample $guard (Sample 103000L 6 300) $null
+Assert ($guard.PendingSamples[1].Overlap -eq 'transition' -and -not $guard.Incident) 'A roam between bands suppresses attribution during the transition'

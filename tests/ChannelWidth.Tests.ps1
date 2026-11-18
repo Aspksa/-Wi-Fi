@@ -12,9 +12,9 @@ function Assert($Value, [string] $Message) {
 function New-Point([int] $Channel, [int] $Width, [int] $Center, [bool] $Owned) {
     [pscustomobject] @{
         Channel = $Channel; Band = '5'; Frequency = 5000 + 5 * $Channel
-        BSSID = if ($Owned) { '00:00:00:00:00:01' } else { '00:00:00:00:00:02' }
+        BSSID = $(if ($Owned) { '00:00:00:00:00:01' } else { '00:00:00:00:00:02' })
         Own = $Owned; Fresh = $true; Signal = 94; SSID = 'Тест'
-        RadioWidth = if ($Width) { @{ Width = $Width; Center = $Center } }
+        RadioWidth = $(if ($Width) { @{ Width = $Width; Center = $Center } })
     }
 }
 

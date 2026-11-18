@@ -218,7 +218,7 @@ function Find-NarrowerChannel([string] $Band, $HomePoint, $Current, [int[]] $Cha
                     Rank = $score + $(if ($trial -and $trial.Count -ge 2) {
                         [Math]::Max(-15, [Math]::Min(15, 5 * ($trial.Losses - $trial.Wins)))
                     } else { 0 })
-                    TrialSupport = if ($proven) { $trial }
+                    TrialSupport = $(if ($proven) { $trial })
                     KeepChannel = $channel -eq $HomePoint.Channel
                 }
             }
@@ -293,7 +293,7 @@ function Get-ChannelPlan {
         Rows = $rows
         Best = $best
         Improves = $improves
-        TrialSupport = if ($proven) { $trialSupport }
+        TrialSupport = $(if ($proven) { $trialSupport })
         VisibleCount = $visible.Count
     }
 }

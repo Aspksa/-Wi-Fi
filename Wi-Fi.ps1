@@ -569,7 +569,7 @@ $probeTimer.Add_Tick({
             $reply = $task.Result
             $lost = $reply.Status -ne 'Success'
             $script:wanResult = @{
-                At = $at; Lost = $lost; Milliseconds = if (-not $lost) { [int] $reply.RoundtripTime }
+                At = $at; Lost = $lost; Milliseconds = $(if (-not $lost) { [int] $reply.RoundtripTime })
             }
         }
     }

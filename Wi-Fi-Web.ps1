@@ -185,7 +185,7 @@ function Update-WebProbes($Run, [long] $Now) {
         if ($task.Status -eq 'Faulted') { [void] $task.Exception }
         if ($task.Status -eq 'RanToCompletion' -and -not $Run.Active -and $Run.WanEpoch -eq $Run.Epoch) {
             $lost = $task.Result.Status -ne 'Success'
-            $Run.WanSample = @{ At = $Now; Lost = $lost; Milliseconds = if (-not $lost) { [int] $task.Result.RoundtripTime } }
+            $Run.WanSample = @{ At = $Now; Lost = $lost; Milliseconds = $(if (-not $lost) { [int] $task.Result.RoundtripTime }) }
         }
     }
     if ($Run.WifiRoute -and $Run.Adapter -and -not $Run.Active -and -not $Run.WanTask -and $Now -ge $Run.NextWan) {

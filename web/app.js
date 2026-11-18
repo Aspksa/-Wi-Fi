@@ -418,6 +418,32 @@ function renderState(next) {
   byId("scan-permissions").textContent = guide.status === "scan-restricted" ?
     "Ограничение Windows: " + guide.reason + " " + (guide.steps || []).join(" ") :
     "Сканирование: подтверждённых ограничений разрешений не обнаружено.";
+  const picker = byId("wifi-adapter-select");
+  const options = state.adapters || [];
+  const optionSignature = JSON.stringify(options.map(a => [a.id,a.name]));
+  if (picker.dataset.signature !== optionSignature) {
+    picker.dataset.signature = optionSignature;
+    picker.replaceChildren(new Option("Автоматический выбор", ""));
+    for (const a of options) picker.add(new Option((a.name || "Wi-Fi") + " · " + (a.status || "неизвестно"), a.id));
+  }
+  if (document.activeElement !== picker) picker.value = state.selectedAdapter || "";
+  const recovery = state.recovery || {};
+  byId("scan-recovery").textContent = "Автовосстановление: " +
+    (recovery.category === "unknown" ? "причина не определена" : recovery.category) +
+    " · последовательных ошибок " + (recovery.failures || 0) +
+    " · при блокировке повтор активного сканирования не чаще раза в 120 секунд.";
+  byId("scan-bands").textContent = "Наблюдаемые диапазоны: " +
+    (state.hardwareBands || []).map(b => b.band + " ГГц: " + b.observed + " точек").join(" · ") +
+    ". Отсутствие точек не доказывает отсутствие аппаратной поддержки.";
+  const startup = state.startupChecks || {};
+  byId("scan-startup").textContent = "Самотест: код " + (startup.codePresent ? "OK" : "неизвестно") +
+    " · интерфейс " + (startup.webFilesPresent ? "OK" : "нет") +
+    " · SQLite " + (startup.sqliteIntegrity ? "OK" : "недоступна") +
+    " · адаптеров " + (startup.wifiAdapters ?? "—");
+  const perf = state.performance || {};
+  byId("scan-performance").textContent = "Процесс: память " + (perf.processWorkingSetMb ?? "—") +
+    " МБ · CPU накопленно " + (perf.cpuSeconds ?? "—") + " сек" +
+    " · скан " + (perf.scanElapsedMs ?? 0) + " мс";
   const adapter = state.adapterSummary || {};
   byId("scan-adapter").textContent = "Wi-Fi-адаптер: " + (adapter.name || "не определён") +
     " · " + (adapter.description || "модель не определена") +
@@ -970,6 +996,7 @@ byId("phone-import").addEventListener("submit", (event) => {
 });
 
 byId("refresh").addEventListener("click", () => command("refresh"));
+byId("wifi-adapter-select").addEventListener("change", event => command("adapter", event.target.value));
 byId("home-form").addEventListener("submit", (event) => {
   event.preventDefault();
   command("home", homeField.value);

@@ -386,6 +386,19 @@ function renderState(next) {
     "Соседние Wi-Fi-сети: " + scanSummary.neighborCount + " · " +
     summaryBands.join(" | ") + ". " + scanSummary.explanation :
     "Ожидание сканирования.";
+  const evolution = state.neighborEvolution || {};
+  byId("neighbor-evolution").textContent = evolution.status === "observed" ?
+    "Наблюдений: " + evolution.completeSurveys + " · устойчивых точек: " + evolution.stable +
+    " · впервые замеченных: " + evolution.new + " · проверяются: " + evolution.tentative +
+    " · не замечены повторно: " + evolution.notObserved + ". " + evolution.explanation :
+    (evolution.explanation || "Пока недостаточно завершённых сканирований.");
+  const changeLabels = { "new-observation": "новая точка", "channel-shift": "смена наблюдаемого канала", "not-observed": "отсутствует в двух снимках" };
+  byId("neighbor-changes").textContent = evolution.changes?.length ?
+    "Изменения за последний час: " + evolution.changes.map(e =>
+      (changeLabels[e.type] || "наблюдение") + " · " + (e.name || "скрытая сеть") +
+      " · " + e.band + " ГГц" + (e.from != null ? " / " + e.from : "") +
+      (e.to != null ? " → " + e.to : "")).join("; ") :
+    "Подтверждённых изменений соседних точек пока нет.";
   byId("router-source-evidence").textContent = state.sourceEvidence?.label || "Источник радиоэфира не определён.";
   byId("router-safety").textContent = state.automation?.reason || "Автоматические изменения отключены.";
   for (const [band, suffix] of [["2.4", "24"], ["5", "5"]]) {

@@ -13,3 +13,11 @@
 Совместимость: Windows PowerShell 5.1, UTF-8 BOM, Wi-Fi.bat, SQLite, одно веб-окно. Настоящую совместимость встроенного адаптера с 6 ГГц нужно проверить на пользовательском оборудовании, GitHub Actions это не измеряет.
 
 Команды тестирования: powershell.exe -File tests/WifiV31.Tests.ps1 ; PcapInspect.ps1 -Path "путь_к_файлу.pcapng"
+
+
+## Восстановление базы (только вручную)
+Закрой программу и запусти из её папки (Windows PowerShell):
+
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\RestoreWifiBackup.ps1 -BackupPath "C:\Users\USER\AppData\Local\Wi Fi\backups\wifi-TIMESTAMP.sqlite" -ConfirmRestore
+
+Скрипт ограничен локальной папкой backups, проверяет integrity_check, не работает при запущенной программе (тот же межпроцессный mutex), сохраняет оригинальную базу и связанные файлы WAL/SHM в rollback-каталоге и пытается откатить операцию при ошибке. Никакого автоматического восстановления без явной команды нет.

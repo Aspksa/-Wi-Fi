@@ -65,7 +65,7 @@ h2 { font-size: 16px; font-weight: 630; letter-spacing: -.018em; }
 .overlap { background: var(--orange); }
 .spectrum { background: radial-gradient(ellipse at 8% 2%, #24241b 0, #171a17 46%, #151915 100%); }
 .spectrum-heading h2 { font-size: 18px; }
-.spectrum-bands { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.spectrum-bands { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); }
 .spectrum-band { position: relative; padding: 14px 17px 9px; border-top: 1px solid var(--line); min-width: 0; }
 .spectrum-band + .spectrum-band { border-left: 1px solid var(--line); }
 .spectrum-plot { height: 190px; border-radius: 4px; cursor: crosshair; }
@@ -130,6 +130,7 @@ tr.stale { color: var(--dim); }
 #events time { font: 11px var(--mono); color: var(--gold); white-space: nowrap; min-width: 52px; }
 .empty { color: var(--muted); font-size: 12px; padding: 13px 17px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@media (max-width: 1020px) { .spectrum-bands { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 860px) {
   .shell { padding: 0 20px 24px; }
   .spectrum-toolbar { flex-wrap: wrap; }

@@ -47,6 +47,7 @@ function Get-WebHealth($Session, [long] $Now) {
                else { 'pending' }
     $scan = if ($Session.Issue) { 'failed' }
             elseif ($Session.Worker -and $Session.ScanStartedAt -and $Now - $Session.ScanStartedAt -gt 25000) { 'slow' }
+            elseif ($Session.ScanBlocked -and $Session.Source -eq 'router-export' -and $Session.ScanAt -and $Now - $Session.ScanAt -le 60000) { 'unverified' }
             elseif ($Session.ScanBlocked) { 'blocked' }
             elseif (-not $Session.ScanAt) { 'pending' }
             elseif ($Now - $Session.ScanAt -gt 45000) { 'stale' }
@@ -95,6 +96,10 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         automation = $Session.Automation
         evidence = $Session.Evidence
         quality = $Session.Quality
+        apiCapture = $Session.ApiCapture
+        trend = $Session.Trend
+        hourlyEfficiency = @($Session.HourlyEfficiency)
+        recentTrials = @($Session.RecentTrials)
         home = $Session.HomeName
         tracked = Get-WebPointId $Session.History.Tracked
         trackedName = $Session.History.Tracked.SSID

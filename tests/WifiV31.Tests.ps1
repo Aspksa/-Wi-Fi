@@ -109,6 +109,11 @@ try{
     Assert $invalid 'Corrupt PCAPNG block length rejected'
 } finally {[IO.Directory]::Delete($ngDir,$true)}
 Add-Type -Path (Join-Path $root 'WifiNativeScan.cs')
+$extended=[WiFi.NativeScanner]::DecodeCapabilities([byte[]]@(48,2,1,0,255,2,36,0,255,2,106,0,250,1,55))
+Assert ($extended.RsnVersion -eq 1 -and $extended.HeOperation -and $extended.EhtOperation -and
+    $extended.UnknownElements -eq 1) 'RSN version, HE/EHT operation and unknown IE evidence'
+$malformed=[WiFi.NativeScanner]::DecodeCapabilities([byte[]]@(48,1,7))
+Assert ($malformed.MalformedRsn -and $null -eq $malformed.RsnVersion) 'Malformed RSN not interpreted as a valid version'
 $rejected=$false
 try{[void][WiFi.NativeScanner]::Scan(0,'not-a-guid')}catch{$rejected=$true}
 Assert $rejected 'Invalid adapter GUID is rejected before any scan or driver call'

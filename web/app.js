@@ -396,6 +396,11 @@ function renderState(next) {
   const cap = state.captureSupport || {};
   byId("v3-monitor").textContent = "Monitor Capture: " + (cap.npcapPresent ? "Npcap обнаружен" : "Npcap не обнаружен") +
     "; захват отключён, поддержка драйвером не подтверждена. PCAP доступен для офлайн-анализа.";
+  const wlanEvents = state.wlanEvents || {};
+  byId("v3-events").textContent = wlanEvents.status === "read-only" ?
+    "WLAN AutoConfig, последние 12 часов: событий " + (wlanEvents.count || 0) +
+    " · " + (wlanEvents.events || []).map(e => "ID " + e.id + " (" + e.at + ")").join(", ") :
+    "Журнал WLAN: нет доступных событий или Windows ограничила чтение.";
   byId("v3-roam").textContent = v3.recentRoams?.length ?
     "Роуминг: " + v3.recentRoams.map(r => r.from + " → " + r.to +
        " · локальных проблем рядом " + r.localProblemsNearby + " (причина не установлена)").join("; ") :

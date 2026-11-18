@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -66,6 +66,7 @@ function Set-WebRoute($Run, $Diagnostics) {
     $Run.WanSample = $null
     $Run.Traffic = $null
     $Run.Latency = @()
+    $Run.NeighborTracker = New-WifiNeighborTracker
     $Run.RecommendationGuards.Clear()
     $Run.RepeatedIssues = @()
     $Run.SourceEvidence = $null
@@ -147,6 +148,9 @@ function Receive-WebScan($Run) {
         $at = Get-Date
         $radio = Get-WifiRadioContext $Run.Points $connected $Run.Engine.Radio $Run.ScanAt
         Update-WifiRadio $Run.Engine $radio $Run.ScanAt
+        if ($result.Native) {
+            [void](Update-WifiNeighborTracker $Run.NeighborTracker $Run.Points ([long]$Run.ScanAt) 'Windows WLAN' ([bool]$result.Native.Completed))
+        }
         if ($Run.Database -and $Run.Engine.PendingScans.Count -lt 120) {
             $Run.Engine.PendingScans.Add([pscustomobject] @{
                 At = $Run.ScanAt; Network = [string] $radio.Network; Points = $Run.Points
@@ -298,6 +302,7 @@ $run = @{
     RouterTelemetryPath = ''; ApiCapturePath = ''; ApiCapture = $null; NextInsights = 0L
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
+    NeighborTracker = New-WifiNeighborTracker
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null

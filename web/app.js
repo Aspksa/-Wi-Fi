@@ -444,6 +444,15 @@ function renderState(next) {
     r.samples + " проб · " + r.badPercent + "% сбоев · " + r.lossPercent + "% потерь · " +
     (r.averageMs == null ? "нет задержки" : r.averageMs + " мс")).join("\n") :
     "Пока недостаточно сохранённых измерений. Результат основан на SQLite.";
+  const density = state.hourlyNeighbors || [];
+  byId("neighbor-hourly").textContent = density.length ? density.slice(0,16).map(r =>
+    r.hourUtc + " UTC · " + r.band + " ГГц · " + r.scans +
+    " сканов · соседей в среднем " + r.averageNeighbors +
+    " (макс. " + r.maxNeighbors + ")" +
+    (r.localBadPercent == null ? " · локальных проб недостаточно" :
+      " · локальных плохих проб " + r.localBadPercent + "%") +
+    " · причинная связь не установлена").join("\\n") :
+    "Нужны как минимум два сохранённых скана за час. Данные из SQLite.";
   const trials = state.recentTrials || [];
   byId("router-trials").textContent = trials.length ? trials.map(r =>
     new Date(r.at).toLocaleString("ru-RU") + " · " + r.old + " → " + r.new +

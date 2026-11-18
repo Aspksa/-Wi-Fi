@@ -21,6 +21,8 @@ let renderedHeat = "";
 let lastStateTime = 0;
 let receivedAt = 0;
 let spectrumFrames = [];
+let windowsFrames = [];
+let phoneFrames = [];
 let frameKey = null;
 let pinnedPoint = null;
 let latestSpectrumScan = null;
@@ -207,7 +209,10 @@ function renderMapControls() {
   historyPosition.max = String(spectrumFrames.length);
   const position = spectrumFrames.indexOf(archive);
   historyPosition.value = String(position >= 0 ? position : spectrumFrames.length);
-  byId("history-time").textContent = archive ? new Date(archive.at).toLocaleTimeString("ru-RU") : "Сейчас";
+  byId("history-time").textContent = archive ?
+    (archive.source === "android" ? "Android · " : "") +
+      (archive.source === "android" ? new Date(archive.at).toLocaleString("ru-RU") : new Date(archive.at).toLocaleTimeString("ru-RU")) :
+    "Сейчас";
   historyPosition.setAttribute("aria-valuetext", byId("history-time").textContent);
   byId("go-live").hidden = !archive;
   air.showControls(archive, mapPoints());
@@ -231,20 +236,69 @@ async function refreshSpectrum(scanAt) {
     const frames = await response.json();
     if (!Array.isArray(frames)) return;
     latestSpectrumScan = scanAt;
-    if (frames.at(-1)?.key !== spectrumFrames.at(-1)?.key && !reduceMotion.matches) revealAt = performance.now();
-    spectrumFrames = frames;
-    air.readArchive(frames);
-    if (frameKey && !frames.some((item) => item.key === frameKey)) frameKey = null;
-    for (const key of frameBins.keys()) {
-      if (!frames.some((candidate) => candidate.key === key)) frameBins.delete(key);
-    }
-    renderMapControls();
-    scheduleDraw();
+    windowsFrames = frames;
+    updateSpectrum();
   } catch {
     // The live plot remains available while the archive is unavailable.
   } finally {
     loadingSpectrum = false;
   }
+}
+
+function updateSpectrum() {
+  const frames = [...windowsFrames.slice(-(16 - phoneFrames.length)), ...phoneFrames]
+    .sort((first, second) => first.at - second.at);
+  if (frames.at(-1)?.key !== spectrumFrames.at(-1)?.key && !reduceMotion.matches) revealAt = performance.now();
+  spectrumFrames = frames;
+  air.readArchive(frames);
+  if (frameKey && !frames.some((item) => item.key === frameKey)) frameKey = null;
+  frameBins.clear();
+  renderMapControls();
+  scheduleDraw();
+}
+
+function parsePhoneScan(report, home) {
+  const lines = report.trim().split(/\r?\n/);
+  if (!lines[0]?.startsWith("Time Stamp|SSID|BSSID|Strength|Primary Channel|Primary Frequency|")) {
+    throw new Error("Вставь текст из пункта «Экспорт» приложения WiFiAnalyzer от VREM.");
+  }
+  const rows = lines.slice(1);
+  const frame = { source: "android", at: 0, points: [] };
+  const byPoint = new Map();
+  for (const row of rows.slice(0, 2000)) {
+    const match = /^(\d{4}\/\d{2}\/\d{2}-\d{2}:\d{2}:\d{2})\|(.*?)\|((?:[a-f\d]{2}:){5}[a-f\d]{2})\|(-?\d+)dBm\|(\d+)\|(\d+)MHz\|[^|]*\|(\d+)MHz\|(\d+)MHz(?: |\|)/i.exec(row);
+    if (!match) continue;
+    const [, stamp, name, address, strength, primaryChannel, primaryFrequency, centerFrequency, widthText] = match;
+    const at = Date.parse(stamp.replaceAll("/", "-").replace(/-(?=\d{2}:)/, "T"));
+    const channel = Number(primaryChannel);
+    const frequency = Number(primaryFrequency);
+    const center = Number(centerFrequency);
+    const width = Number(widthText);
+    const rssi = Number(strength);
+    const band = channel >= 1 && channel <= 14 && frequency === (channel === 14 ? 2484 : 2407 + 5 * channel) ? "2.4" :
+      channel >= 32 && channel <= 177 && frequency === 5000 + 5 * channel ? "5" : null;
+    if (!band || !Number.isFinite(at) || rssi < -127 || rssi >= 0) continue;
+    // Exports expose one center frequency. Use the primary 20 MHz if width cannot be inferred.
+    const measured = (band === "5" ? [20, 40, 80, 160] : [20, 40]).includes(width) &&
+      Math.abs(frequency - center) <= width / 2 - 10;
+    const assumedWidth = measured ? width : 20;
+    const midpoint = measured ? center : frequency;
+    const id = address.toLowerCase() + "/" + band;
+    if (frame.at && frame.at !== at) throw new Error("Вставь один экспорт за раз.");
+    frame.at = at;
+    const point = {
+      id, name: name || "Скрытая сеть", band, channel, frequency, rssi, observedAt: at,
+      signal: Math.round(Math.min(100, Math.max(1, 2 * (rssi + 100)))),
+      signalText: rssi + " дБм", width: assumedWidth, measured,
+      segments: [{ Left: midpoint - assumedWidth / 2, Right: midpoint + assumedWidth / 2 }],
+      own: Boolean(home && name === home), stale: false, tracked: false,
+    };
+    if (!byPoint.has(id) || byPoint.get(id).rssi < rssi) byPoint.set(id, point);
+  }
+  if (!byPoint.size) throw new Error("В экспорте нет читаемых точек 2,4 или 5 ГГц.");
+  frame.key = "android/" + frame.at;
+  frame.points = [...byPoint.values()].sort((first, second) => second.rssi - first.rssi).slice(0, 500);
+  return frame;
 }
 
 function chooseFrame(key) {
@@ -764,6 +818,23 @@ async function command(name, value = "") {
     renderStatus();
   }
 }
+
+byId("phone-import").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const input = byId("phone-report");
+  const status = byId("phone-import-status");
+  try {
+    const home = byId("phone-home").value.trim() || state?.home;
+    const snapshot = parsePhoneScan(input.value, home);
+    phoneFrames = [...phoneFrames.filter((frame) => frame.key !== snapshot.key).slice(-7), snapshot];
+    updateSpectrum();
+    chooseFrame(snapshot.key);
+    status.textContent = "Снимок открыт · точек: " + snapshot.points.length;
+    input.value = "";
+  } catch (error) {
+    status.textContent = error.message;
+  }
+});
 
 byId("refresh").addEventListener("click", () => command("refresh"));
 byId("home-form").addEventListener("submit", (event) => {

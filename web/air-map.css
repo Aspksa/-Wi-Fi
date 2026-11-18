@@ -210,3 +210,12 @@ summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
 @media (max-width: 570px) {
   .intro { padding-block: 14px; }
 }
+
+.phone-import { display: grid; justify-items: start; gap: 9px; color: var(--muted); font-size: 13px; }
+.phone-import textarea, .phone-import input {
+  font: inherit; color: var(--text); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+  max-width: 100%;
+}
+.phone-import textarea { width: min(100%, 640px); resize: vertical; }
+.playback output { white-space: normal; }

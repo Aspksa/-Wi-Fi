@@ -96,8 +96,6 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
         automation = $Session.Automation
         evidence = $Session.Evidence
         quality = $Session.Quality
-        apiCapture = $Session.ApiCapture
-        apiAssessment = $Session.CaptureAssessment
         sourceEvidence = $Session.SourceEvidence
         recommendationGuards = $Session.RecommendationGuards
         repeatedIssues = @($Session.RepeatedIssues)

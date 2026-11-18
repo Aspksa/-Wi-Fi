@@ -115,9 +115,10 @@ function Receive-WebScan($Run) {
                 At = $Run.ScanAt; Network = [string] $radio.Network; Points = $Run.Points
             })
         }
+        $latencyEvidence = Get-WifiLatencyEvidence @($Run.Engine.Samples) ([string] $radio.Network) (Get-UnixMilliseconds)
         foreach ($band in @('2.4', '5')) {
             $advice = Get-WifiRecommendation $Run.Points $band $connected $at $Run.Link $result.Native $Run.History `
-                $Run.Database $Run.Streak[$band] $Run.Forecast
+                $Run.Database $Run.Streak[$band] $Run.Forecast $latencyEvidence
             $Run.Streak[$band] = $advice.Streak
             $Run.Plans[$band] = $advice.Plan
             $Run.Advice[$band] = $advice.Text

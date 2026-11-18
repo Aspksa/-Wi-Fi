@@ -24,6 +24,11 @@ Assert ($recovery.Failures -eq 0 -and $recovery.Events.Count -eq 1) 'Successful 
 Assert ((Get-WifiRecoveryDelay 99 $false) -le 120000) 'Bounded exponential backoff'
 $bands=@(Get-WifiBandEvidence @([pscustomobject]@{Band='6';Fresh=$true}))
 Assert ($bands.Count -eq 3 -and $bands[2].observed -eq 1 -and $bands[0].hardwareSupport -eq 'not-verified') '6 GHz observed does not imply other band support'
+$variation=@(Get-WifiSsidVariations @(
+    [pscustomobject]@{SSID='Public';BSSID='aa:aa:aa:aa:aa:01';Fresh=$true;Own=$false;Capabilities=@{Rsn=$true;Generation='Wi-Fi 6'}}
+    [pscustomobject]@{SSID='Public';BSSID='aa:aa:aa:aa:aa:02';Fresh=$true;Own=$false;Capabilities=@{Rsn=$false;Generation='Wi-Fi 5'}}
+))
+Assert ($variation.Count -eq 1 -and $variation[0].classification -eq 'configuration-variation-not-proof-of-impostor') 'SSID variations cannot be called attack'
 $memory=New-WifiResearchMemory
 $p=[pscustomobject]@{BSSID='aa:bb:cc:dd:ee:01';SSID='Home';Channel=1;Band='2.4';Fresh=$true;Rssi=-48;Capabilities=@{Generation='Wi-Fi 5';Rsn=$true}}
 Update-WifiResearchMemory $memory @($p) 200000L $true

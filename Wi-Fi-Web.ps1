@@ -1,5 +1,5 @@
 ﻿$ErrorActionPreference = 'Stop'
-foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1', 'WifiReliabilityV31.ps1', 'WifiLongMemoryV31.ps1')) {
+foreach ($file in @('Scan.ps1', 'Monitor.ps1', 'Intelligence.ps1', 'Database.ps1', 'Recommendation.ps1', 'ScanJob.ps1', 'WebState.ps1', 'RouterDiscovery.ps1', 'RouterTelemetry.ps1', 'RouterDecision.ps1', 'RouterInsights.ps1', 'RouterV22.ps1', 'NeighborScan.ps1', 'NeighborTracking.ps1', 'SpectrumV25.ps1', 'WifiV3.ps1', 'WifiReliabilityV31.ps1', 'WifiLongMemoryV31.ps1', 'WifiResearchV31.ps1')) {
     . (Join-Path $PSScriptRoot $file)
 }
 Add-Type -Path (Join-Path $PSScriptRoot 'WifiWebServer.cs')
@@ -72,6 +72,7 @@ function Set-WebRoute($Run, $Diagnostics) {
     $Run.Traffic = $null
     $Run.Latency = @()
     $Run.NeighborTracker = New-WifiNeighborTracker
+    $Run.Research=New-WifiResearchMemory
     $Run.RecommendationGuards.Clear()
     $Run.RepeatedIssues = @()
     $Run.SourceEvidence = $null
@@ -162,6 +163,7 @@ function Receive-WebScan($Run) {
         $radio = Get-WifiRadioContext $Run.Points $connected $Run.Engine.Radio $Run.ScanAt
         Update-WifiRadio $Run.Engine $radio $Run.ScanAt
         if ($result.Native) {
+            Update-WifiResearchMemory $Run.Research @($Run.Points) ([long]$Run.ScanAt) ([bool]$result.Native.Completed)
             [void](Update-WifiNeighborTracker $Run.NeighborTracker $Run.Points ([long]$Run.ScanAt) 'Windows WLAN' ([bool]$result.Native.Completed))
             $own=@($Run.Points | Where-Object {$_.BSSID -eq $result.Native.Connected -and $_.Fresh -ne $false} | Select-Object -First 1)
             if($own.Count) {
@@ -193,6 +195,7 @@ function Receive-WebScan($Run) {
         $Run.Issue = $_.Exception.GetBaseException().Message
         $Run.ScanFailures++
         Add-WifiRecoveryEvent $Run.Recovery (Get-UnixMilliseconds) $Run.Issue
+        Add-WifiInvestigation $Run.Research (Get-UnixMilliseconds) (Get-WifiFailureCategory $Run.Issue $false $false) @($Run.Points) @($Run.Latency)
         $Run.NextScan = (Get-UnixMilliseconds) + (Get-WifiScanInterval $false $true $false $false $Run.ScanFailures)
         $Run.LastActive = 0L
         $Run.Streak.Clear()
@@ -325,7 +328,8 @@ $run = @{
     NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
     Roaming=New-WifiRoamTracker; CaptureSupport=$null; DirectInventory=$null; WlanEvents=$null
     Recovery=New-WifiRecoveryState; SelectedAdapter=''; AdapterInventory=@(); StartupChecks=$null; Alert=$null
-    NextBackup=0L; LastBackup=$null; LongHistory=@()
+    NextBackup=0L; LastBackup=$null; LongHistory=@(); NextReport=0L; LastReport=$null
+    Research=New-WifiResearchMemory
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -334,6 +338,7 @@ try {
     $legacy = Join-Path $folder 'history.json'
     $run.RouterTelemetryPath = Join-Path $folder 'router-telemetry.json'
     $run.BackupFolder=Join-Path $folder 'backups'
+    $run.ReportFolder=Join-Path $folder 'reports'
     # No firmware research is required for normal operation.
     try {
         $run.Database = Open-WifiDatabase (Join-Path $folder 'wifi.sqlite')
@@ -421,6 +426,7 @@ try {
             $run.ScanStartedAt = 0L
             $run.ScanFailures++
             Add-WifiRecoveryEvent $run.Recovery $now 'timeout'
+            Add-WifiInvestigation $run.Research $now 'timeout' @($run.Points) @($run.Latency)
             $run.NextScan = $now + (Get-WifiScanInterval $false $true $false $false $run.ScanFailures)
             $run.Issue = 'Сканирование не ответило. Перезапускаю проверку автоматически.'
         }
@@ -484,6 +490,20 @@ try {
             if($run.Database -and $now -ge $run.NextBackup){
                 $run.LastBackup=Save-WifiVerifiedBackup $run.Database $run.BackupFolder $now
                 $run.NextBackup=$now+18000000
+            }
+            if($now -ge $run.NextReport){
+                try{
+                    $report=[pscustomobject]@{
+                        at=$now;source=$run.Source;scanBlocked=[bool]$run.ScanBlocked
+                        neighborCount=@($run.Points|Where-Object{-not $_.Own}).Count
+                        bands=@(Get-WifiBandEvidence @($run.Points))
+                        recoveryEvents=@($run.Recovery.Events|Select-Object -First 8)
+                        confidence=Get-WifiResearchConfidence $run.Research ([int]$run.NeighborTracker.CompletedSurveys) ([string]$run.Source) ($now-[long]$run.ScanAt)
+                        performance=Get-WifiPerformanceSnapshot ([long]$run.ScanStartedAt) $now ([int]$run.ScanFailures)
+                    }
+                    $run.LastReport=Save-WifiLocalReport $run.ReportFolder $report $now
+                } catch {$run.LastReport=$null}
+                $run.NextReport=$now+18000000
             }
             $flushAt = $now + 10000
         }

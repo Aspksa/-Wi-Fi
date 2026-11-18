@@ -1,17 +1,4 @@
 ﻿# Wi-Fi v2.2: evidence and safety; no router mutations.
-function Get-Re3lCaptureAssessment($Capture, [string] $ExpectedFirmware) {
-    if (-not $Capture -or $Capture.status -ne 'inspection-only') {
-        return [pscustomobject] @{ status='unverified'; firmwareMatched=$false; endpoints=@(); readReady=$false; writeReady=$false; rollbackReady=$false; reason='Нет подтверждённого журнала функций RE3L.' }
-    }
-    $endpoints = @($Capture.entries | Where-Object { $_.method -eq 'GET' -and $_.status -eq 200 -and -not $_.usable })
-    # A sanitized request list does not prove JSON structure, authorization, or firmware compatibility.
-    [pscustomobject] @{
-        status='capture-only'; firmwareMatched=$false; endpoints=@($endpoints | Select-Object -First 25)
-        readReady=$false; writeReady=$false; rollbackReady=$false
-        reason='Наблюдённые GET-запросы не подтверждают структуру ответа и права чтения; требуется проверка на устройстве.'
-    }
-}
-
 function Get-WifiRecommendationGuard($Plan, $LatencyEvidence, $Trend, [string] $Source,
         [long] $ScanAt, [long] $Now, [bool] $Confirmed) {
     $reasons = @()
@@ -74,18 +61,17 @@ function Get-WifiObservedSource($Source, $Telemetry, [long]$Now) {
         return [pscustomobject] @{ kind='measured'; radioSurvey='observed-networks'; airtime='not-measured'; label='Windows WLAN: измерены точки доступа, занятость эфира не измерена' }
     }
     if ($Source -eq 'router-export' -and $Telemetry -and $Now - $Telemetry.capturedAt -ge 0 -and $Now - $Telemetry.capturedAt -le 60000) {
-        return [pscustomobject] @{ kind='unverified-import'; radioSurvey='router-export'; airtime='unverified-claim'; label='Импорт панели RE3L: происхождение аппаратных счётчиков не подтверждено' }
+        return [pscustomobject] @{ kind='unverified-import'; radioSurvey='router-export'; airtime='unverified-claim'; label='Импорт данных: аппаратные счётчики не подтверждены' }
     }
     [pscustomobject] @{ kind='unavailable'; radioSurvey='unknown'; airtime='not-measured'; label='Нет проверенного свежего сканирования радиоэфира' }
 }
 
-function Get-Re3lSafeWritePolicy($Router, $Capture) {
-    # Do not implement change/rollback requests without a certified, device-tested driver.
+function Get-WifiSafeWritePolicy {
+    # No generic API for changing router channels; explicit fail closed.
     [pscustomobject] @{
         enabled=$false; writeSupported=$false; rollbackSupported=$false
-        needsFirmwareMatch=$true; needsPhysicalVerification=$true
         userConfirmationRequired=$true; cooldownSeconds=3600
         lastKnownGoodRequired=$true; state='locked'
-        reason='Запись и откат RE3L недоступны: нет подтверждённого API, прав и испытанного восстановления.'
+        reason='Автоматическая смена и откат выключены: универсального безопасного интерфейса управления роутером нет.'
     }
 }

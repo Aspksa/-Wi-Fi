@@ -27,22 +27,22 @@ function Get-ChannelReplay($Plan, [object[]] $Snapshots, [long] $Now) {
     $wins = 0
     $count = 0
     foreach ($snapshot in ($Snapshots | Where-Object { $_.At -ge $Now - 900000 -and $_.At -le $Now } | Sort-Object At -Descending)) {
-        $home = $snapshot.Points | Where-Object {
+        $ownScanPoint = $snapshot.Points | Where-Object {
             $_.BSSID -eq $Plan.Home.BSSID -and $_.Band -eq $Plan.Home.Band -and $_.Channel -eq $Plan.Home.Channel -and
                 $_.Fresh -ne $false -and $_.ObservedAt -and $snapshot.At - $_.ObservedAt -le 45000 -and
                 (Get-ReportedWidth $_) -eq $Plan.Current.Width
         } | Select-Object -First 1
-        if (-not $home -or $seen.ContainsKey([long] $home.ObservedAt)) { continue }
-        $seen[[long] $home.ObservedAt] = $true
+        if (-not $ownScanPoint -or $seen.ContainsKey([long] $ownScanPoint.ObservedAt)) { continue }
+        $seen[[long] $ownScanPoint.ObservedAt] = $true
         $neighbors = @($snapshot.Points | Where-Object {
-            $_.Band -eq $home.Band -and -not $_.Own -and $_.BSSID -ne $home.BSSID -and $_.Fresh -ne $false -and
+            $_.Band -eq $ownScanPoint.Band -and -not $_.Own -and $_.BSSID -ne $ownScanPoint.BSSID -and $_.Fresh -ne $false -and
                 (-not $_.ObservedAt -or $snapshot.At - $_.ObservedAt -le 45000)
         })
-        $baseline = Get-CandidateFootprint $home.Band $home.Channel $home
-        $candidate = Get-CandidateFootprint $home.Band $Plan.Best.Channel $home $Plan.Best.Width
+        $baseline = Get-CandidateFootprint $ownScanPoint.Band $ownScanPoint.Channel $ownScanPoint
+        $candidate = Get-CandidateFootprint $ownScanPoint.Band $Plan.Best.Channel $ownScanPoint $Plan.Best.Width
         if (-not $baseline -or -not $candidate) { continue }
-        $baseScore = Get-ChannelScore $home.Channel $home.Band $neighbors $baseline
-        $newScore = Get-ChannelScore $Plan.Best.Channel $home.Band $neighbors $candidate
+        $baseScore = Get-ChannelScore $ownScanPoint.Channel $ownScanPoint.Band $neighbors $baseline
+        $newScore = Get-ChannelScore $Plan.Best.Channel $ownScanPoint.Band $neighbors $candidate
         if ($baseScore - $newScore -ge [Math]::Max(5, 0.15 * $baseScore)) { $wins++ }
         $count++
         if ($count -ge 10) { break }

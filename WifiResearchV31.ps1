@@ -80,3 +80,26 @@ function Save-WifiLocalReport([string]$Directory,$Data,[long]$Now){
     [IO.File]::WriteAllText($html,$document,[Text.UTF8Encoding]::new($false))
     [pscustomobject]@{json=$json;html=$html;at=$Now}
 }
+
+
+# Different BSSIDs sharing an SSID can be ordinary roaming or multi-band deployment.
+function Get-WifiSsidVariations([object[]]$Points) {
+    $groups=@($Points | Where-Object {
+        $_ -and $_.Fresh -ne $false -and $_.SSID -and $_.BSSID -and -not $_.Own
+    } | Group-Object SSID)
+    $results=@()
+    foreach($group in $groups) {
+        $unique=@($group.Group | Group-Object BSSID | ForEach-Object {$_.Group | Select-Object -First 1})
+        if($unique.Count -lt 2){continue}
+        $rsn=@($unique | Where-Object {$_.Capabilities} | ForEach-Object {[bool]$_.Capabilities.Rsn} | Select-Object -Unique)
+        $gen=@($unique | Where-Object {$_.Capabilities -and $_.Capabilities.Generation -ne 'unverified'} |
+            ForEach-Object {$_.Capabilities.Generation} | Select-Object -Unique)
+        if($rsn.Count -lt 2 -and $gen.Count -lt 2){continue}
+        $results += [pscustomobject]@{
+            ssid=[string]$group.Name;accessPoints=$unique.Count
+            reportedSecurityModes=$rsn.Count;reportedGenerations=$gen.Count
+            classification='configuration-variation-not-proof-of-impostor'
+        }
+    }
+    @($results | Select-Object -First 8)
+}

@@ -15,7 +15,6 @@ let actionError = "";
 let stamp = "";
 let frame = 0;
 let trail = null;
-let databaseMessages = "";
 let renderedPoints = "";
 let renderedEvents = "";
 let renderedHeat = "";
@@ -66,15 +65,38 @@ function child(tag, text, className) {
 
 function renderStatus() {
   const status = byId("connection");
-  status.classList.toggle("live", connected && !state?.issue);
-  status.classList.toggle("fault", !connected || Boolean(state?.issue));
+  const health = state?.health;
+  const stalled = connected && performance.now() - receivedAt > 6500;
+  const fault = !connected || stalled || Boolean(state?.issue || state?.storage) ||
+    health?.scan === "stale" || health?.scan === "slow";
+  status.classList.toggle("live", !fault && health?.scan === "fresh");
+  status.classList.toggle("fault", fault);
   status.lastElementChild.textContent = !connected ? "Нет связи" :
-    state?.issue ? "Проверить Wi-Fi" : state?.scanning ? "Сканирование" : "Локальный режим";
+    stalled ? "Обновления остановились" : fault ? "Нужна проверка" :
+    state?.scanning ? "Сканирование" : "Локальный режим";
   byId("refresh").disabled = Boolean(connected && state?.scanning);
   byId("scan-meta").textContent = state?.scanAt ?
     new Date(state.scanAt).toLocaleTimeString("ru-RU") + " · " + state.source + " · " + state.points.length + " точек" :
     "Ожидание первого замера";
-  const message = actionError || (!connected ? "Подключение к Wi Fi потеряно. Проверь окно запуска." : state?.issue || databaseMessages);
+  const adapter = { pending: "Проверка адаптера", ready: "Адаптер доступен", unverified: "Адаптер не подтверждён" };
+  const scan = {
+    pending: "Ждём первый замер", failed: "Ошибка сканирования", empty: "Точек доступа не видно",
+    slow: "Windows долго не завершает сканирование",
+    unverified: "Возраст замеров неизвестен", fresh: "Свежие замеры", stale: "Замеры устарели",
+  };
+  const storage = { ready: "SQLite доступна", degraded: "Ошибка SQLite", unavailable: "SQLite недоступна" };
+  const result = connected && !stalled && health ?
+    [adapter[health.adapter], scan[health.scan], storage[health.storage]].filter(Boolean).join(" · ") :
+    stalled ? "Служба замеров перестала присылать обновления." : "Ожидание ответа службы замеров";
+  const check = byId("startup-check");
+  if (check.textContent !== result) check.textContent = result;
+  const message = [
+    actionError,
+    !connected ? "Подключение к Wi Fi потеряно. Проверь окно запуска." :
+      stalled ? "Окно сервера отвечает, но замеры остановились. Проверь окно запуска Wi Fi." :
+      state?.issue || (health?.scan === "stale" ? "Windows давно не возвращала свежие замеры. Нажми «Обновить»." : ""),
+    connected && !stalled ? state?.storage : "",
+  ].filter(Boolean).join(" ");
   const notice = byId("notice");
   notice.textContent = message;
   notice.hidden = !message;
@@ -248,10 +270,9 @@ function renderState(next) {
   }
   state = next;
   air.readState(next);
+  if (lastStateTime !== next.now) receivedAt = performance.now();
   lastStateTime = next.now;
-  receivedAt = performance.now();
   connected = true;
-  databaseMessages = state.storage || "";
   if (state.home !== stamp) {
     if (document.activeElement !== homeField) homeField.value = state.home;
     stamp = state.home;
@@ -716,7 +737,7 @@ async function refresh() {
     const response = await fetch("/api/state", { cache: "no-store", signal: AbortSignal.timeout(2600) });
     if (!response.ok) throw new Error("state");
     const next = await response.json();
-    if (!Array.isArray(next.bands) || next.bands.length !== 2) throw new Error("incomplete");
+    if (!Number.isFinite(next.now) || !Array.isArray(next.bands) || next.bands.length !== 2) throw new Error("incomplete");
     renderState(next);
   } catch {
     connected = false;

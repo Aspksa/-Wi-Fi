@@ -28,6 +28,22 @@ let latestSpectrumScan = null;
 let loadingSpectrum = false;
 let revealAt = -Infinity;
 const frameBins = new Map();
+let overlapHatch;
+
+function overlapPattern(context) {
+  if (!overlapHatch) {
+    const tile = document.createElement("canvas");
+    tile.width = tile.height = 8;
+    const ink = tile.getContext("2d");
+    ink.strokeStyle = "#eaaa617a";
+    ink.beginPath();
+    ink.moveTo(0, 8);
+    ink.lineTo(8, 0);
+    ink.stroke();
+    overlapHatch = context.createPattern(tile, "repeat");
+  }
+  return overlapHatch;
+}
 const historyPosition = byId("history-position");
 
 const air = AirMap.create({
@@ -224,6 +240,12 @@ function renderState(next) {
   if (previous && current && previous.channel !== current.channel && !reduceMotion.matches) {
     trail = { previous, current, at: performance.now() };
   }
+  if (next.scanAt && next.scanAt !== state?.scanAt && !reduceMotion.matches) {
+    document.querySelector(".brand .glyph")?.animate?.(
+      [{ opacity: .45 }, { opacity: 1, offset: .36 }, { opacity: .85 }],
+      { duration: 720, easing: "ease-out" }
+    );
+  }
   state = next;
   air.readState(next);
   lastStateTime = next.now;
@@ -365,7 +387,9 @@ function drawBand(band, now) {
         for (const ownPath of localPaths) {
           context.save();
           context.clip(ownPath);
-          context.fillStyle = palette.glow + "55";
+          context.fillStyle = palette.glow + "33";
+          context.fill(path);
+          context.fillStyle = overlapPattern(context);
           context.fill(path);
           context.restore();
         }
@@ -606,7 +630,7 @@ function scheduleDraw() {
       drawBand(band, now);
       drawWaterfall(band, now);
     }
-    air.drawVolumes(now, selectedFrame(), pinnedPoint || state?.tracked);
+    if (byId("archive-view").open) air.drawVolumes(now, selectedFrame(), pinnedPoint || state?.tracked);
     const pulse = drawLatency(now);
     const story = air.tick(now);
     if (trail && now - trail.at >= 2200) trail = null;
@@ -683,6 +707,7 @@ historyPosition.addEventListener("input", () => {
 });
 byId("go-live").addEventListener("click", () => chooseFrame(null));
 byId("clear-point").addEventListener("click", () => choosePoint(null));
+byId("archive-view").addEventListener("toggle", scheduleDraw);
 addEventListener("resize", scheduleDraw);
 scheduleDraw();
 

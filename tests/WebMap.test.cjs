@@ -110,3 +110,30 @@ test("blocked radio scan leaves the connection dashboard in diagnostics mode", (
   assert.match(page.get("points").children[0].children[0].textContent, /ограничено Windows/);
   assert.equal(page.get("notice").hidden, true);
 });
+
+test("imports a VREM scan and displays its own and neighboring access points", () => {
+  const page = dashboard();
+  const report = [
+    "Time Stamp|SSID|BSSID|Strength|Primary Channel|Primary Frequency|Center Channel|Center Frequency|Width (Range)|Distance|",
+    "2026/11/18-21:12:55|Дом|12:34:56:78:90:ab|-43dBm|36|5180MHz|42|5210MHz|80MHz (5170 - 5250)|~1m|",
+    "2026/11/18-21:12:55|SSID|с разделителем|aa:bb:cc:dd:ee:ff|-71dBm|6|2437MHz|6|2437MHz|20MHz (2427 - 2447)|~2m|",
+    "2026/11/18-21:12:55|Сеть 6 ГГц|aa:aa:aa:aa:aa:aa|-60dBm|5|5975MHz|5|5975MHz|20MHz (5965 - 5985)|~2m|",
+  ].join("\r\n");
+  page.get("phone-report").value = report;
+  page.get("phone-home").value = "Дом";
+  page.get("phone-import").listeners.submit({ preventDefault() {} });
+  assert.match(page.get("phone-import-status").textContent, /точек: 2/);
+  assert.match(page.get("history-time").textContent, /Android/);
+  assert.equal(page.run("selectedFrame().points[0].segments[0].Left"), 5170);
+  assert.equal(page.run("selectedFrame().points[0].own"), true);
+  assert.equal(page.run("selectedFrame().points[1].name"), "SSID|с разделителем");
+  assert.equal(page.run('spectrumFrames.length'), 1);
+  page.run("windowsFrames = []; updateSpectrum()");
+  assert.equal(page.run('selectedFrame().source'), "android");
+});
+
+test("phone snapshots do not imply a radio cause of a Windows latency episode", () => {
+  const page = episodePage([{ key: "phone", at: 100000, points: [], source: "android" }]);
+  page.run("air.tick(2000)");
+  assert.equal(page.run("air.frame()"), null);
+});

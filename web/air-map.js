@@ -286,6 +286,7 @@ const AirMap = (() => {
       let nearest = null;
       let distance = Infinity;
       for (const item of snapshots) {
+        if (item.source === "android") continue;
         const delta = Math.abs(item.at - at);
         if (Number.isFinite(item.at) && delta <= ageLimit && delta < distance) {
           nearest = item;

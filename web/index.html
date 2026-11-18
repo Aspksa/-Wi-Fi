@@ -186,6 +186,17 @@
         <ol id="events"><li class="empty">Событий пока нет.</li></ol>
       </section>
     </div>
+    <details class="preferences">
+      <summary><svg class="glyph" aria-hidden="true"><use href="#icon-spectrum"/></svg>Снимок эфира с Android</summary>
+      <form id="phone-import" class="preferences-body phone-import">
+        <label for="phone-report">Вставь текст экспорта WiFiAnalyzer (VREM)</label>
+        <textarea id="phone-report" rows="4" maxlength="400000" required spellcheck="false"></textarea>
+        <label for="phone-home">Имя своей сети (для подсветки на карте)</label>
+        <input id="phone-home" maxlength="64">
+        <button type="submit" class="quiet">Открыть снимок</button>
+        <p id="phone-import-status" role="status"></p>
+      </form>
+    </details>
     <details class="preferences"><summary><svg class="glyph" aria-hidden="true"><use href="#icon-router"/></svg>Своя сеть и автопоказ</summary>
       <div class="preferences-body">
       <form id="home-form" class="home-form">

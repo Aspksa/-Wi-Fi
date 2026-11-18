@@ -307,7 +307,7 @@ $run = @{
     ScanFailures=0; NativeCompleted=$false
     Evidence = @{}; Quality = @{}; HourlyEfficiency = @(); RecentTrials = @(); Trend = $null
     SourceEvidence = $null; RecommendationGuards = @{}; RepeatedIssues = @(); CaptureAssessment = $null
-    NeighborTracker = New-WifiNeighborTracker
+    NeighborTracker = New-WifiNeighborTracker; HourlyNeighbors=@()
     Automation = Get-WifiSafeWritePolicy
 }
 $server = $null
@@ -423,6 +423,7 @@ try {
                 if ($run.Database) {
                     $run.HourlyEfficiency = @(Get-WifiHourlyEfficiency $run.Database $now)
                     $run.RecentTrials = @(Get-WifiRecentTrials $run.Database $now)
+                    $run.HourlyNeighbors = @(Get-WifiHourlyNeighborDensity $run.Database $now @($run.HourlyEfficiency))
                 }
             } catch {
                 # Telemetry failures are isolated from the ping and scan loop.

@@ -18,7 +18,7 @@ $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
 $mutex=[Threading.Mutex]::new($false,"Local\WiFiDashboard-$($identity.User.Value)")
 $owns=$false
 try{
-    try{$owns=$mutex.WaitOne(0)}catch[Threading.AbandonedMutexException]{$owns=$true}
+    try{$owns=$mutex.WaitOne(0)}catch [Threading.AbandonedMutexException]{$owns=$true}
     if(-not $owns){throw 'Сначала закрой работающий Wi-Fi: восстановление во время записи запрещено.'}
     $database=Join-Path $folder 'wifi.sqlite'
     $result=Restore-WifiVerifiedBackup $resolved $database (Join-Path $folder 'rollback')

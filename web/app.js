@@ -355,7 +355,9 @@ function renderState(next) {
   const telemetry = state.routerTelemetry;
   byId("router-source").textContent = telemetry ? "Импорт RE3L" : "Windows / шлюз";
   byId("router-identity").textContent = "Адрес: " + (router.address || "не определён") +
-    " · Модель: " + (router.model || "не подтверждена") + " · Прошивка: " + (router.firmware || "неизвестна");
+    " · Модель: " + (router.model || "не подтверждена") + " · Прошивка: " + (router.firmware || "неизвестна") +
+    " · Панель: " + (router.scheme ? router.scheme.toUpperCase() : "недоступна") +
+    " · Авторизация: " + ({ "login-required": "требуется", "open-page": "открытая страница", "redirect-unverified": "редирект" }[router.authentication] || "неизвестно");
   const cap = router.capabilities || {};
   const hint = key => cap[key] === "interface-hint" ? "упоминание на странице (не проверено)" : "не подтверждено";
   byId("router-capabilities").textContent = (router.explanation || "Доступность функций API пока неизвестна.") +
@@ -371,6 +373,17 @@ function renderState(next) {
     byId("evidence-" + suffix).textContent = (band === "2.4" ? "2,4" : "5") + " ГГц: " +
       (evidence?.reasons?.join(" · ") || "Ожидание измерений");
   }
+  const ranking = ["2.4", "5"].flatMap(band => {
+    const rows = state.quality?.[band] || [];
+    const top = rows.slice(0, 3).map(row => {
+      const q = row.measuredQuality;
+      return row.channel + " (" + row.width + " МГц): оценка " + row.historicalRank.toFixed(1) +
+        (q?.comparable ? ", замеры " + q.badPercent + "% сбоев, p90 " + q.p90 + " мс" :
+        ", реальных испытаний канала недостаточно");
+    });
+    return [band + " ГГц: " + (top.join("; ") || "нет подтверждённых каналов")];
+  });
+  byId("router-ranking").textContent = ranking.join(" · ");
   renderHeat();
   renderLists();
   renderMapControls();

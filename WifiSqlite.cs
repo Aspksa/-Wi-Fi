@@ -20,6 +20,13 @@ namespace WiFi
         [DllImport(Library, CallingConvention = Convention)]
         private static extern int sqlite3_close(IntPtr db);
         [DllImport(Library, CallingConvention = Convention)]
+        private static extern IntPtr sqlite3_backup_init(IntPtr destination, byte[] destinationName,
+            IntPtr source, byte[] sourceName);
+        [DllImport(Library, CallingConvention = Convention)]
+        private static extern int sqlite3_backup_step(IntPtr backup, int pages);
+        [DllImport(Library, CallingConvention = Convention)]
+        private static extern int sqlite3_backup_finish(IntPtr backup);
+        [DllImport(Library, CallingConvention = Convention)]
         private static extern int sqlite3_busy_timeout(IntPtr db, int milliseconds);
         [DllImport(Library, CallingConvention = Convention)]
         private static extern IntPtr sqlite3_errmsg(IntPtr db);
@@ -146,6 +153,21 @@ namespace WiFi
             finally
             {
                 if (statement != IntPtr.Zero) { sqlite3_finalize(statement); }
+            }
+        }
+
+        // Online SQLite snapshot API: includes committed WAL transactions, unlike a raw file copy.
+        public void Backup(string destination)
+        {
+            if (database == IntPtr.Zero) { throw new ObjectDisposedException("Sqlite"); }
+            using (var target = new Sqlite(destination))
+            {
+                IntPtr backup = sqlite3_backup_init(target.database, Utf8("main"), database, Utf8("main"));
+                if (backup == IntPtr.Zero) { throw new IOException("SQLite backup initialization failed."); }
+                int step, finish;
+                try { step = sqlite3_backup_step(backup, -1); }
+                finally { finish = sqlite3_backup_finish(backup); }
+                if (step != 101 || finish != 0) { throw new IOException("SQLite backup did not complete."); }
             }
         }
 

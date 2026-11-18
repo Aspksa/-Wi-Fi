@@ -45,7 +45,10 @@ $radio = try {
 } catch {
     $errorCause = $_.Exception.GetBaseException()
     $nativeDenied = $errorCause -is [ComponentModel.Win32Exception] -and $errorCause.NativeErrorCode -eq 5
-    if ($AdapterId -and -not $nativeDenied) {throw ('Выбранный адаптер недоступен: ' + $errorCause.Message)}
+    if ($AdapterId) {
+        if ($nativeDenied) { return (Get-DiagnosticsOnlyResult) }
+        throw ('Выбранный адаптер недоступен: ' + $errorCause.Message)
+    }
     $null
 }
 if ($radio) {

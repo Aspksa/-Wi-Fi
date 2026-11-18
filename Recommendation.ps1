@@ -1,3 +1,23 @@
+# Diagnose the affected route using measured probes, not estimated spectrum occupancy.
+function Get-WifiLatencyEvidence([object[]] $Samples, [string] $Network, [long] $Now) {
+    $recent = @($Samples | Where-Object {
+        $_.Network -eq $Network -and $_.At -ge ($Now - 120000) -and $_.At -le $Now -and
+        -not $_.Scanning -and $null -ne $_.LanLoss -and $null -ne $_.WanLoss
+    })
+    $localBad = @($recent | Where-Object { $_.LanLoss -eq $true -or ($null -ne $_.Lan -and $_.Lan -gt 35) }).Count
+    $externalOnly = @($recent | Where-Object {
+        $_.LanLoss -ne $true -and $null -ne $_.Lan -and $_.Lan -le 35 -and
+        ($_.WanLoss -eq $true -or ($null -ne $_.Wan -and $_.Wan -gt 180))
+    }).Count
+    $classification = 'insufficient'
+    if ($recent.Count -ge 20) {
+        if ($localBad -ge 3 -and $localBad -gt $externalOnly) { $classification = 'local' }
+        elseif ($externalOnly -ge 3 -and $externalOnly -gt $localBad) { $classification = 'external' }
+        else { $classification = 'stable-or-unclear' }
+    }
+    [pscustomobject] @{ Classification = $classification; Samples = $recent.Count; LocalBad = $localBad; ExternalOnly = $externalOnly }
+}
+
 ﻿function Get-ChannelReplay($Plan, [object[]] $Snapshots, [long] $Now) {
     $seen = @{}
     $wins = 0
@@ -28,7 +48,7 @@
 
 function Get-WifiRecommendation {
     param([object[]] $Points, [string] $Band, [string[]] $Connected, [datetime] $At, [string] $State,
-        $Native, $History, $Database, $Previous, $Forecast)
+        $Native, $History, $Database, $Previous, $Forecast, $LatencyEvidence = $null)
 
     $storageNote = ''
     $plan = Get-ChannelPlan $Points $band $Connected
@@ -60,7 +80,7 @@ function Get-WifiRecommendation {
         $message = 'Ожидание свежего снимка эфира.'
     } elseif (-not $plan.Home) {
         $message = 'Укажи SSID, чтобы определить свой канал.'
-    } elseif ($State -eq 'external') {
+    } elseif ($State -eq 'external' -or ($LatencyEvidence -and $LatencyEvidence.Classification -eq 'external')) {
         $message = "Канал $($plan.Home.Channel). Проблема видна только до внешнего адреса."
     } elseif ($plan.Improves) {
         $count = 1
@@ -84,6 +104,11 @@ function Get-WifiRecommendation {
                 "Канал $choice · помогло в $($plan.TrialSupport.Wins) прошлых сравнениях."
             } else {
                 "Канал $choice · оценка помех $($current.Score) → $($plan.Best.Score)."
+            }
+            if ($LatencyEvidence -and $LatencyEvidence.Classification -eq 'local') {
+                $message += " · Замеры подтверждают локальные сбои ($($LatencyEvidence.LocalBad) из $($LatencyEvidence.Samples))."
+            } elseif ($LatencyEvidence -and $LatencyEvidence.Classification -eq 'stable-or-unclear') {
+                $message += ' · Локальных сбоев недостаточно для подтверждения причины.'
             }
             if (-not $Previous.Confirmed -and $Previous.Observation -ne $observation) { Add-MonitorEvent $History $At "$bandText · совет: $message" }
         } elseif (-not $Native) {

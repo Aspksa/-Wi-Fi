@@ -43,6 +43,7 @@ function Start-WebScan($Run, [long] $Now, [bool] $Force) {
     [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'Monitor.ps1'))
     [void] $Run.Worker.AddArgument((Join-Path $PSScriptRoot 'WifiNativeScan.cs'))
     [void] $Run.Worker.AddArgument($active)
+    $Run.ScanStartedAt = $Now
     $Run.ScanTask = $Run.Worker.BeginInvoke()
     $Run.NextScan = $Now + 30000
 }
@@ -240,6 +241,7 @@ try {
         $run.HomeName = [string] (Get-DatabaseSetting $run.Database 'home_ssid')
         $run.History = Get-DatabaseHistory $run.Database $legacy
     } catch {
+        Write-Warning ("SQLite: " + $_.Exception.GetBaseException().Message)
         if ($run.Database) { $run.Database.Dispose(); $run.Database = $null }
         try { $run.History = Read-MonitorHistory $legacy } catch { }
         $run.Storage = 'SQLite недоступна. История этой сессии останется в памяти.'

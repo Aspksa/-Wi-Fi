@@ -78,3 +78,23 @@ test("empty network list updates when scanning finishes", () => {
   page.run('state.scanning = false; renderLists()');
   assert.match(message(), /Видимых точек нет/);
 });
+
+test("status displays independent WLAN and SQLite errors", () => {
+  const page = dashboard();
+  page.run(`connected = true;
+    state = { health: {adapter:"unverified", scan:"failed", storage:"degraded"},
+      issue:"Отказано в доступе", storage:"Ошибка записи истории" };
+    renderStatus();`);
+  assert.match(page.get("startup-check").textContent, /Ошибка сканирования.*Ошибка SQLite/);
+  assert.match(page.get("notice").textContent, /Отказано в доступе.*Ошибка записи истории/);
+});
+
+test("status detects a server returning the same state for too long", () => {
+  const page = dashboard();
+  page.run(`connected = true;
+    state = { health: {adapter:"ready", scan:"fresh", storage:"ready"} };
+    receivedAt = -7000;
+    renderStatus();`);
+  assert.match(page.get("startup-check").textContent, /перестала присылать/);
+  assert.equal(page.get("connection").lastElementChild.textContent, "Обновления остановились");
+});

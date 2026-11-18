@@ -67,6 +67,23 @@ Assert ($projection.episodes[0].band -eq '5' -and $projection.episodes[0].route 
 $externalEpisode = Get-WebEpisode @{ Id='wan'; At=195500L; Network='2.4|mesh'; Cause='upload'; Message='Внешняя задержка' }
 Assert ($externalEpisode.route -eq 'external') 'External episodes keep their route classification'
 
+$healthRun = @{ Database = $true; ScanAt = 100000L; Source = 'Windows WLAN'; Points = @() }
+$health = Get-WebHealth @{} 100000L
+Assert ($health.adapter -eq 'pending' -and $health.scan -eq 'pending' -and $health.storage -eq 'unavailable') 'Startup distinguishes pending WLAN and missing storage'
+Assert ((Get-WebHealth $healthRun 101000L).scan -eq 'empty') 'An empty scan still confirms adapter access'
+$healthRun.Points = @(@{ Fresh = $true; ObservedAt = 55000L })
+Assert ((Get-WebHealth $healthRun 100000L).scan -eq 'fresh') 'An observation at the freshness threshold is accepted'
+Assert ((Get-WebHealth $healthRun 100001L).scan -eq 'stale') 'A recent cache read does not renew the observation timestamp'
+$healthRun.Source = 'netsh'
+Assert ((Get-WebHealth $healthRun 101000L).scan -eq 'unverified') 'Netsh cache age is unknown'
+$healthRun.Worker = $true
+$healthRun.ScanStartedAt = 100000L
+Assert ((Get-WebHealth $healthRun 125001L).scan -eq 'slow') 'A stalled WLAN worker is detected while the server remains responsive'
+$healthRun.Issue = 'Access denied'
+$healthRun.Storage = 'Write failed'
+$health = Get-WebHealth $healthRun 101000L
+Assert ($health.scan -eq 'failed' -and $health.adapter -eq 'unverified' -and $health.storage -eq 'degraded') 'WLAN and storage failures can be reported together'
+
 $server = [WiFi.WebServer]::new((Join-Path $project 'web'))
 $handler = [System.Net.Http.HttpClientHandler]::new()
 $handler.UseProxy = $false

@@ -39,6 +39,26 @@ function Get-WebHeat($History, [datetime] $At, [string] $Band) {
     }
 }
 
+function Get-WebHealth($Session, [long] $Now) {
+    $adapter = if ($Session.Issue) { 'unverified' }
+               elseif ($Session.Source) { 'ready' }
+               else { 'pending' }
+    $scan = if ($Session.Issue) { 'failed' }
+            elseif ($Session.Worker -and $Session.ScanStartedAt -and $Now - $Session.ScanStartedAt -gt 25000) { 'slow' }
+            elseif (-not $Session.ScanAt) { 'pending' }
+            elseif ($Now - $Session.ScanAt -gt 45000) { 'stale' }
+            elseif (-not $Session.Points.Count) { 'empty' }
+            elseif ($Session.Source -eq 'netsh') { 'unverified' }
+            elseif ($Session.Points | Where-Object {
+                $_.Fresh -ne $false -and ($null -eq $_.ObservedAt -or $Now - $_.ObservedAt -le 45000)
+            } | Select-Object -First 1) { 'fresh' }
+            else { 'stale' }
+    $storage = if (-not $Session.Database) { 'unavailable' }
+               elseif ($Session.Storage) { 'degraded' }
+               else { 'ready' }
+    [pscustomobject] @{ adapter = $adapter; scan = $scan; storage = $storage }
+}
+
 function Get-WebState($Session, [long] $Now, [datetime] $At) {
     $bands = foreach ($band in @('2.4', '5')) {
         $plan = $Session.Plans[$band]
@@ -66,6 +86,7 @@ function Get-WebState($Session, [long] $Now, [datetime] $At) {
     [pscustomobject] @{
         now = $Now; scanAt = $Session.ScanAt; scanning = [bool] $Session.Worker
         source = $Session.Source; issue = $Session.Issue; storage = $Session.Storage
+        health = Get-WebHealth $Session $Now
         home = $Session.HomeName
         tracked = Get-WebPointId $Session.History.Tracked
         trackedName = $Session.History.Tracked.SSID

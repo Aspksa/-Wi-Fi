@@ -204,3 +204,9 @@ summary:focus-visible { outline: 2px solid var(--gold); outline-offset: -3px; }
 @media (prefers-reduced-motion: reduce) {
   summary::after { transition: none; }
 }
+
+.startup-check { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.startup-check + .subtext { margin-top: 5px; }
+@media (max-width: 570px) {
+  .intro { padding-block: 14px; }
+}
